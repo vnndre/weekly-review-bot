@@ -1,0 +1,5 @@
+.DS_Store
+*.csv
+metrics_history.json
+.env
+.env.local

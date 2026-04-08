@@ -1,0 +1,797 @@
+{
+  "name": "Venue Review Report Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "mode": "id"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "a0f7ed57-18d5-4ad9-9c0d-de9cb1614b4f",
+      "name": "Google Drive Trigger",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        -400,
+        112
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Your googleDriveOAuth2Api"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "condition-csv",
+              "leftValue": "={{ $json.name }}",
+              "rightValue": ".csv",
+              "operator": {
+                "type": "string",
+                "operation": "endsWith"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9828e805-a980-49c6-bded-7c100ddca5cb",
+      "name": "Filter CSV Files",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -208,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "8fad0b5f-3c06-485e-a812-3f4723625844",
+      "name": "Download CSV",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        0,
+        0
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Your googleDriveOAuth2Api"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "fba8bfea-7df2-4a8f-958f-f81a5b8826a6",
+      "name": "Download Metrics History",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        0,
+        208
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Your googleDriveOAuth2Api"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "eb864aee-5aca-4bef-a69c-ce986dac0562",
+      "name": "Merge CSV + History",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        208,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\n// ============================================\n// VENUE REVIEW REPORT - CSV PROCESSOR\n// WITH DYNAMIC FISCAL CALENDAR ENGINE\n// ============================================\n\n// ---- FISCAL CALENDAR ENGINE ----\nconst FY_ANCHOR = new Date('2024-07-01T00:00:00');\nconst FY_DAYS = 364;\nconst MS_PER_DAY = 86400000;\n\nfunction getFiscalInfo(dateObj) {\n  // Normalize to midnight\n  const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());\n  const daysSinceAnchor = Math.floor((d - FY_ANCHOR) / MS_PER_DAY);\n  \n  const fyIndex = Math.floor(daysSinceAnchor / FY_DAYS);\n  const dayInFY = daysSinceAnchor % FY_DAYS;\n  \n  const fyStartYear = 2024 + fyIndex;\n  const fyLabel = 'FY' + String(fyStartYear % 100).padStart(2, '0') + '-' + String((fyStartYear + 1) % 100).padStart(2, '0');\n  \n  const weekNum = Math.floor(dayInFY / 7) + 1;\n  const periodNum = Math.floor((weekNum - 1) / 4) + 1;\n  const weekInPeriod = ((weekNum - 1) % 4) + 1;\n  \n  const fyStart = new Date(FY_ANCHOR.getTime() + fyIndex * FY_DAYS * MS_PER_DAY);\n  const fyEnd = new Date(fyStart.getTime() + (FY_DAYS - 1) * MS_PER_DAY);\n  \n  const weekStart = new Date(fyStart.getTime() + (weekNum - 1) * 7 * MS_PER_DAY);\n  const weekEnd = new Date(weekStart.getTime() + 6 * MS_PER_DAY);\n  \n  const periodStartWk = (periodNum - 1) * 4 + 1;\n  const periodStart = new Date(fyStart.getTime() + (periodStartWk - 1) * 7 * MS_PER_DAY);\n  const periodEnd = new Date(periodStart.getTime() + 27 * MS_PER_DAY);\n  \n  return {\n    fyLabel, fyStartYear, fyStart, fyEnd,\n    periodNum, periodLabel: 'P' + String(periodNum).padStart(2, '0'),\n    periodStart, periodEnd,\n    weekNum, weekLabel: 'WK' + weekNum,\n    weekInPeriod,\n    weekStart, weekEnd\n  };\n}\n\n\n\nfunction parseCSV(csvText) {\n  const lines = csvText.split('\\n');\n  if (lines.length < 2) return [];\n  \n  const header = parseCSVLine(lines[0]);\n  const rows = [];\n  \n  for (let i = 1; i < lines.length; i++) {\n    if (!lines[i].trim()) continue;\n    const values = parseCSVLine(lines[i]);\n    const row = {};\n    header.forEach((col, idx) => {\n      row[col.trim()] = values[idx] ? values[idx].trim() : '';\n    });\n    rows.push(row);\n  }\n  return rows;\n}\n\nfunction parseCSVLine(line) {\n  const result = [];\n  let current = '';\n  let inQuotes = false;\n  \n  for (let i = 0; i < line.length; i++) {\n    const char = line[i];\n    if (char === '\"') {\n      if (inQuotes && i + 1 < line.length && line[i + 1] === '\"') {\n        current += '\"';\n        i++;\n      } else {\n        inQuotes = !inQuotes;\n      }\n    } else if (char === ',' && !inQuotes) {\n      result.push(current);\n      current = '';\n    } else {\n      current += char;\n    }\n  }\n  result.push(current);\n  return result;\n}\n\nfunction parseDate(dateStr) {\n  if (!dateStr) return null;\n  const d = new Date(dateStr);\n  return isNaN(d.getTime()) ? null : d;\n}\n\nfunction formatDate(d) {\n  return d.toISOString().split('T')[0];\n}\n\nfunction getOrdinalSuffix(day) {\n  if (day > 3 && day < 21) return 'th';\n  switch (day % 10) {\n    case 1: return 'st';\n    case 2: return 'nd';\n    case 3: return 'rd';\n    default: return 'th';\n  }\n}\n\nfunction formatDateDisplay(d) {\n  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];\n  const day = d.getDate();\n  return months[d.getMonth()] + ' ' + day + getOrdinalSuffix(day);\n}\n\nfunction getDayName(d) {\n  return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()];\n}\n\nfunction computeMetrics(allReviews, weekStart, weekEnd, periodStart, periodEnd, fyStart, fyEnd) {\n  const wsDate = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());\n  const weDate = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());\n  weDate.setHours(23, 59, 59, 999);\n  \n  const psDate = new Date(periodStart.getFullYear(), periodStart.getMonth(), periodStart.getDate());\n  const peDate = new Date(periodEnd.getFullYear(), periodEnd.getMonth(), periodEnd.getDate());\n  peDate.setHours(23, 59, 59, 999);\n  \n  const fysDate = new Date(fyStart.getFullYear(), fyStart.getMonth(), fyStart.getDate());\n  const fyeDate = new Date(fyEnd.getFullYear(), fyEnd.getMonth(), fyEnd.getDate());\n  fyeDate.setHours(23, 59, 59, 999);\n  \n  const weekReviews = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= wsDate && d <= weDate;\n  });\n  \n  const activeWeek = weekReviews.filter(r => !r['Deleted'] || r['Deleted'].trim() === '');\n  const deletedWeek = weekReviews.filter(r => r['Deleted'] && r['Deleted'].trim() !== '');\n  \n  const weeklyAvg = activeWeek.length > 0 \n    ? Math.round((activeWeek.reduce((sum, r) => sum + parseFloat(r['Rating']), 0) / activeWeek.length) * 100) / 100 \n    : 0;\n  \n  const ptdReviews = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= psDate && d <= peDate && (!r['Deleted'] || r['Deleted'].trim() === '');\n  });\n  const ptdAvg = ptdReviews.length > 0\n    ? Math.round((ptdReviews.reduce((sum, r) => sum + parseFloat(r['Rating']), 0) / ptdReviews.length) * 100) / 100\n    : 0;\n  \n  const ytdReviews = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= fysDate && d <= fyeDate && (!r['Deleted'] || r['Deleted'].trim() === '');\n  });\n  const ytdAvg = ytdReviews.length > 0\n    ? Math.round((ytdReviews.reduce((sum, r) => sum + parseFloat(r['Rating']), 0) / ytdReviews.length) * 100) / 100\n    : 0;\n  \n  const ratingDist = {};\n  for (let i = 5; i >= 1; i--) {\n    const count = activeWeek.filter(r => Math.round(parseFloat(r['Rating'])) === i).length;\n    const pct = activeWeek.length > 0 ? Math.round((count / activeWeek.length) * 100) : 0;\n    ratingDist[i] = { count, pct };\n  }\n  \n  const sources = {};\n  activeWeek.forEach(r => {\n    const src = r['Source'] || 'Unknown';\n    sources[src] = (sources[src] || 0) + 1;\n  });\n  \n  const ptdDeleted = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= psDate && d <= peDate && r['Deleted'] && r['Deleted'].trim() !== '';\n  }).length;\n  \n  const ytdDeleted = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= fysDate && d <= fyeDate && r['Deleted'] && r['Deleted'].trim() !== '';\n  }).length;\n  \n  // Dynamic name detection: find any capitalized word (3+ letters) that looks like a first name\n  // The reviewer who reads the report can remove any false positives\n  const nameMentions = {};\n  const stopWords = new Set([\n    'the','and','but','for','are','was','were','been','being','have','has','had',\n    'will','would','could','should','shall','may','might','can','did','does','done',\n    'not','this','that','these','those','with','from','into','upon','about','after',\n    'before','above','below','between','under','over','through','during','while',\n    'where','when','which','what','who','whom','whose','how','than','then','here',\n    'there','each','every','both','few','more','most','other','some','such','only',\n    'same','also','just','back','been','come','even','give','good','great','just',\n    'know','like','look','make','many','much','need','next','open','part','play',\n    'real','said','take','tell','think','very','want','well','went','work','year',\n    'best','better','came','first','last','long','made','right','still','thing',\n    'time','used','way','our','out','all','any','day','got','her','him','his','its',\n    'let','new','now','off','old','one','own','put','run','say','she','too','try',\n    'two','use','your','they','them','their','mine','ours','yours','really','always',\n    'never','sometimes','maybe','please','thank','thanks','great','amazing','awesome',\n    'wonderful','terrible','horrible','worst','love','loved','loved','hate','hated',\n    'place','night','drinks','food','drink','staff','service','experience','fun',\n    'birthday','party','music','games','golf','mini','course','courses','bar',\n    'bartender','server','host','manager','wait','table','google','yelp','tripadvisor',\n    'definitely','absolutely',\n    'highly','recommend','recommended','visited','visit','went','going','came',\n    'saturday','sunday','monday','tuesday','wednesday','thursday','friday',\n    'january','february','march','april','june','july','august','september',\n    'october','november','december','may'\n  ]);\n  \n  activeWeek.forEach(r => {\n    const text = r['Review'] || '';\n    // Find capitalized words that are 3+ chars and not at sentence start\n    const words = text.match(/(?<=[a-z.,!?;:]\\s+)[A-Z][a-z]{2,}/g) || [];\n    // Also check words after common patterns like \"named\", \"by\", \"our\", \"ask for\", \"shoutout to\"\n    const namedPatterns = text.match(/(?:named|name is|name was|shout ?out to|ask for|helped by|served by|bartender|server|host)\\s+([A-Z][a-z]{2,})/gi) || [];\n    \n    const allNames = [...words];\n    namedPatterns.forEach(match => {\n      const parts = match.split(/\\s+/);\n      const last = parts[parts.length - 1];\n      if (last && last[0] === last[0].toUpperCase()) allNames.push(last);\n    });\n    \n    allNames.forEach(word => {\n      const clean = word.replace(/[^a-zA-Z]/g, '');\n      if (clean.length >= 3 && !stopWords.has(clean.toLowerCase())) {\n        nameMentions[clean] = (nameMentions[clean] || 0) + 1;\n      }\n    });\n  });\n  \n  const dailyBreakdown = {};\n  activeWeek.forEach(r => {\n    const d = parseDate(r['Published']);\n    if (!d) return;\n    const dayKey = formatDate(d);\n    if (!dailyBreakdown[dayKey]) {\n      dailyBreakdown[dayKey] = { date: d, positive: 0, neutral: 0, negative: 0, reviews: [] };\n    }\n    const rating = parseFloat(r['Rating']);\n    if (rating >= 4) dailyBreakdown[dayKey].positive++;\n    else if (rating === 3) dailyBreakdown[dayKey].neutral++;\n    else dailyBreakdown[dayKey].negative++;\n    dailyBreakdown[dayKey].reviews.push(r);\n  });\n  \n  return {\n    totalReviews: activeWeek.length,\n    weeklyAvg,\n    ptdAvg,\n    ptdCount: ptdReviews.length,\n    ytdAvg,\n    ytdCount: ytdReviews.length,\n    deletedThisWeek: deletedWeek.length,\n    deletedPTD: ptdDeleted,\n    deletedYTD: ytdDeleted,\n    ratingDist,\n    sources,\n    nameMentions,\n    dailyBreakdown,\n    activeReviews: activeWeek,\n    deletedReviews: deletedWeek\n  };\n}\n\nfunction formatAuthorName(author) {\n  if (!author) return 'Anonymous';\n  const parts = author.trim().split(/\\s+/);\n  if (parts.length === 0) return 'Anonymous';\n  if (parts.length === 1) return parts[0];\n  return parts[0] + ' ' + parts[1][0] + '.';\n}\n\nconst items = $input.all();\nlet csvText = '';\nlet historyData = { weeks: [] };\n\nfor (const item of items) {\n  if (item.binary) {\n    // Try each binary key (could be 'data', 'file', 'attachment', etc.)\n    for (const key of Object.keys(item.binary)) {\n      try {\n        // n8n stores binary as a reference - use helpers to get buffer\n        const binaryObj = item.binary[key];\n        let text = '';\n        \n        // Method 1: n8n >= 1.x uses await helpers.getBinaryDataBuffer\n        if (typeof helpers !== 'undefined' && helpers.getBinaryDataBuffer) {\n          const buffer = await helpers.getBinaryDataBuffer(items.indexOf(item), key);\n          text = buffer.toString('utf-8');\n        }\n        // Method 2: Direct base64 data property (older n8n or some modes)  \n        else if (binaryObj.data) {\n          text = Buffer.from(binaryObj.data, 'base64').toString('utf-8');\n        }\n        \n        if (!text) continue;\n        \n        const trimmed = text.trim();\n        if (trimmed.startsWith('{') && trimmed.includes('\"weeks\"')) {\n          historyData = JSON.parse(trimmed);\n        } else if (trimmed.includes(',') && (trimmed.toLowerCase().includes('review') || trimmed.toLowerCase().includes('rating') || trimmed.toLowerCase().includes('published'))) {\n          csvText = text;\n        }\n      } catch(e) {\n        // Continue to next binary key\n      }\n    }\n  }\n}\n\nconst allReviews = parseCSV(csvText);\nif (allReviews.length === 0) {\n  return [{ json: { error: 'No reviews found in CSV' } }];\n}\n\nlet latestDate = new Date();\nconst publishedDates = allReviews.map(r => parseDate(r['Published'])).filter(d => d !== null);\nif (publishedDates.length > 0) {\n  publishedDates.sort((a, b) => a - b);\n  latestDate = publishedDates[publishedDates.length - 1];\n}\n\nconst fiscalInfo = getFiscalInfo(latestDate);\nconst { fyLabel, fyStart, fyEnd, periodNum, periodLabel, periodStart, periodEnd, weekNum, weekStart, weekEnd } = fiscalInfo;\n\nconst metrics = computeMetrics(allReviews, weekStart, weekEnd, periodStart, periodEnd, fyStart, fyEnd);\n\nconst wsDisplay = formatDateDisplay(weekStart);\nconst weDisplay = formatDateDisplay(weekEnd);\n\nlet priorWeekMetrics = null;\nif (historyData.weeks && historyData.weeks.length > 0) {\n  const priorWeek = historyData.weeks.find(w => w.weekNum === (weekNum - 1) && w.fyLabel === fyLabel);\n  if (priorWeek) {\n    priorWeekMetrics = priorWeek;\n  }\n}\n\nlet ptdHistoryMetrics = null;\nif (historyData.weeks && historyData.weeks.length > 0) {\n  const periodWeeks = historyData.weeks.filter(w => w.periodNum === periodNum && w.fyLabel === fyLabel && w.weekNum !== weekNum);\n  if (periodWeeks.length > 0) {\n    const totalReviews = periodWeeks.reduce((sum, w) => sum + (w.totalReviews || 0), 0);\n    const avgRating = periodWeeks.length > 0 \n      ? Math.round((periodWeeks.reduce((sum, w) => sum + (w.weeklyAvg || 0), 0) / periodWeeks.length) * 100) / 100\n      : 0;\n    ptdHistoryMetrics = { totalReviews, weeklyAvg: avgRating, weekCount: periodWeeks.length };\n  }\n}\n\nlet priorPeriodMetrics = null;\nif (historyData.weeks && historyData.weeks.length > 0) {\n  const priorPeriodNum = periodNum - 1;\n  const priorPeriodWeeks = historyData.weeks.filter(w => w.periodNum === priorPeriodNum && w.fyLabel === fyLabel);\n  if (priorPeriodWeeks.length > 0) {\n    const totalReviews = priorPeriodWeeks.reduce((sum, w) => sum + (w.totalReviews || 0), 0);\n    const avgRating = priorPeriodWeeks.length > 0\n      ? Math.round((priorPeriodWeeks.reduce((sum, w) => sum + (w.weeklyAvg || 0), 0) / priorPeriodWeeks.length) * 100) / 100\n      : 0;\n    priorPeriodMetrics = { totalReviews, weeklyAvg: avgRating, periodLabel: 'P' + String(priorPeriodNum).padStart(2, '0') };\n  }\n}\n\nconst promoters = metrics.activeReviews.filter(r => parseFloat(r['Rating']) >= 4);\nconst neutrals = metrics.activeReviews.filter(r => Math.round(parseFloat(r['Rating'])) === 3);\nconst detractors = metrics.activeReviews.filter(r => parseFloat(r['Rating']) <= 2);\n\nfunction buildReviewList(reviews) {\n  return reviews.map(r => {\n    const author = formatAuthorName(r['Author']);\n    const rating = parseFloat(r['Rating']);\n    const source = r['Source'] || 'Unknown';\n    const date = r['Published'] ? r['Published'].split(' ')[0] : '';\n    const text = r['Review'] || '(no comment)';\n    return '- ' + author + ' (' + rating + '\u2605 ' + source + ', ' + date + '): ' + text;\n  }).join('\\n');\n}\n\nlet comparisonStr = '';\nif (priorWeekMetrics) {\n  const changeReviews = metrics.totalReviews - priorWeekMetrics.totalReviews;\n  const pctChange = priorWeekMetrics.totalReviews > 0 \n    ? Math.round((changeReviews / priorWeekMetrics.totalReviews) * 100)\n    : 0;\n  const arrow = changeReviews >= 0 ? '\u2191' : '\u2193';\n  const changeRating = metrics.weeklyAvg - priorWeekMetrics.weeklyAvg;\n  const ratingArrow = changeRating >= 0 ? '\u2191' : '\u2193';\n  comparisonStr += '\\n- Prior Week: ' + priorWeekMetrics.totalReviews + ' reviews at ' + priorWeekMetrics.weeklyAvg + '\u2605 (change: ' + arrow + ' ' + Math.abs(changeReviews) + ' reviews / ' + pctChange + '%, rating: ' + ratingArrow + ' ' + Math.abs(changeRating).toFixed(2) + ')';\n}\n\nif (ptdHistoryMetrics) {\n  comparisonStr += '\\n- Period to Date (' + periodLabel + '): avg ' + ptdHistoryMetrics.weeklyAvg + '\u2605 across ' + ptdHistoryMetrics.weekCount + ' prior weeks';\n}\n\nif (priorPeriodMetrics) {\n  comparisonStr += '\\n- Prior Period (' + priorPeriodMetrics.periodLabel + '): ' + priorPeriodMetrics.totalReviews + ' total reviews at ' + priorPeriodMetrics.weeklyAvg + '\u2605';\n}\n\nconst claudePrompt = 'You are generating a weekly customer feedback report for {{VENUE_NAME}} ({{VENUE_DESCRIPTION}}).\\n\\n' +\n'REPORT PERIOD: Week ' + weekNum + ' (' + periodLabel + ') \u2014 ' + wsDisplay + ' \u2013 ' + weDisplay + '\\n' +\n'FISCAL INFO: ' + fyLabel + '\\n\\n' +\n'COMPUTED METRICS (use these exact numbers):\\n' +\n'- Total Reviews (active, non-deleted): ' + metrics.totalReviews + '\\n' +\n'- Weekly Average Rating: ' + metrics.weeklyAvg + '\\n' +\n'- PTD Average (' + periodLabel + '): ' + metrics.ptdAvg + ' (' + metrics.ptdCount + ' reviews)\\n' +\n'- YTD Average (' + fyLabel + '): ' + metrics.ytdAvg + ' (' + metrics.ytdCount + ' reviews)\\n' +\n'- Deleted this week: ' + metrics.deletedThisWeek + '\\n' +\n'- Deleted ' + periodLabel + ' to date: ' + metrics.deletedPTD + '\\n' +\n'- Deleted ' + fyLabel + ' to date: ' + metrics.deletedYTD + '\\n' +\n'- Response Rate: 100%\\n' +\n'- Response Time: < 1 day\\n\\n' +\n'RATING DISTRIBUTION (non-deleted):\\n' +\nObject.entries(metrics.ratingDist).map(([r,v]) => r + '\u2605 \u2013 ' + v.count + ' (' + v.pct + '%)').join('\\n') + '\\n\\n' +\n'SOURCES (non-deleted):\\n' +\nObject.entries(metrics.sources).map(([s,c]) => s + ' \u2013 ' + c).join('\\n') + '\\n\\n' +\n(metrics.deletedThisWeek > 0 ? 'DELETED REVIEWS (' + metrics.deletedThisWeek + ' total, excluded from all ratings):\\n' + \n  metrics.deletedReviews.map(r => '- ' + formatAuthorName(r['Author']) + ' (' + r['Rating'] + '\u2605 ' + r['Source'] + '): ' + (r['Review'] || '(no comment)')).join('\\n') + '\\n\\n' : '') +\n'PROMOTER REVIEWS (4-5\u2605):\\n' +\n(promoters.length > 0 ? buildReviewList(promoters) : 'None this week') + '\\n\\n' +\n'NEUTRAL REVIEWS (3\u2605):\\n' +\n(neutrals.length > 0 ? buildReviewList(neutrals) : 'None this week') + '\\n\\n' +\n'DETRACTOR REVIEWS (1-2\u2605):\\n' +\n(detractors.length > 0 ? buildReviewList(detractors) : 'None this week') + '\\n\\n' +\n'NAME MENTIONS (auto-detected from reviews \u2014 reviewer should verify these are actual staff):\\n' +\n(Object.keys(metrics.nameMentions).length > 0 ? Object.entries(metrics.nameMentions).map(([n,c]) => n + ': ' + c).join('\\n') : 'No staff mentioned by name this week') + '\\n\\n' +\n'COMPARISONS FROM HISTORY:\\n' +\n(comparisonStr || 'No prior data available') + '\\n\\n' +\n'DAILY BREAKDOWN:\\n' +\nObject.entries(metrics.dailyBreakdown).sort().map(([day, info]) => {\n  const dayName = getDayName(info.date);\n  return dayName + ' ' + day + ': ' + info.positive + ' positive, ' + info.neutral + ' neutral, ' + info.negative + ' negative';\n}).join('\\n') + '\\n\\n' +\n'---\\n\\n' +\n'GENERATE THE REPORT USING EXACT METRICS. Format: # FEEDBACK REPORT, ## Venue, ## Week info, ### FEEDBACK BREAKDOWN (with exact numbers), ### REVIEW OBSERVATIONS (4-5\u2605, 3\u2605, 1-2\u2605), ### FEEDBACK TRENDS, ### FOCUS POINTS, ### NAME DROPS';\n\n// Pre-build the full Claude API request body in the Code node\n// so n8n doesn't mangle it in HTTP Request expressions\nconst claudeRequestBody = JSON.stringify({\n  model: 'claude-sonnet-4-20250514',\n  max_tokens: 4096,\n  messages: [{ role: 'user', content: claudePrompt }]\n});\n\nreturn [{\n  json: {\n    claudePrompt,\n    claudeRequestBody,\n    metrics: {\n      totalReviews: metrics.totalReviews,\n      weeklyAvg: metrics.weeklyAvg,\n      ptdAvg: metrics.ptdAvg,\n      ptdCount: metrics.ptdCount,\n      ytdAvg: metrics.ytdAvg,\n      ytdCount: metrics.ytdCount,\n      deletedThisWeek: metrics.deletedThisWeek,\n      deletedPTD: metrics.deletedPTD,\n      deletedYTD: metrics.deletedYTD,\n      ratingDist: metrics.ratingDist,\n      sources: metrics.sources,\n      nameMentions: metrics.nameMentions\n    },\n    weekInfo: {\n      fyLabel,\n      periodNum,\n      periodLabel,\n      weekNum,\n      weekStart: formatDate(weekStart),\n      weekEnd: formatDate(weekEnd),\n      weekStartDisplay: wsDisplay,\n      weekEndDisplay: weDisplay\n    },\n    fileName: 'Venue_Review_Report_' + fyLabel + '_' + periodLabel + '_WK' + weekNum + '_' + formatDate(weekStart) + '.md',\n    historyData: historyData,\n    comparisons: {\n      priorWeek: priorWeekMetrics,\n      ptdHistory: ptdHistoryMetrics,\n      priorPeriod: priorPeriodMetrics\n    }\n  }\n}];\n"
+      },
+      "id": "a17d55fb-5208-412f-99f1-c03e0f26c701",
+      "name": "Process CSV & Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        432,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.claudeRequestBody }}",
+        "options": {}
+      },
+      "id": "5b3eef02-b371-4c4a-8d19-a82bb90ee177",
+      "name": "Call Claude API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        640,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $json.content[0].text; return [{json: {report: response}}];"
+      },
+      "id": "6ed6138c-ff61-430e-a073-2dc81a1ad031",
+      "name": "Extract Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        848,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const report = $json.report;\nconst fileName = $('Process CSV & Build Prompt').first().json.fileName;\nconst buffer = Buffer.from(report, 'utf-8');\nreturn [{\n  json: {fileName, fileSize: buffer.length},\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'text/markdown',\n      fileName: fileName\n    }\n  }\n}];"
+      },
+      "id": "3dc9b8ea-f73c-4e57-b718-e57c77da08d9",
+      "name": "Prepare Report File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ \"name='\" + $json.fileName.match(/FY\\d{2}-\\d{2}/)[0] + \"' and mimeType='application/vnd.google-apps.folder' and trashed=false\" }}"
+            },
+            {
+              "name": "fields",
+              "value": "files(id,name)"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "17738c9c-9834-4ed3-af51-76eca6bd6bc5",
+      "name": "Search FY Folder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1248,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "condition-fy-exists",
+              "leftValue": "={{ $json.files.length }}",
+              "rightValue": "0",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ea2caaa3-484c-4271-af5b-af9c963e6e57",
+      "name": "FY Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1424,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "={{ $('Process CSV & Build Prompt').first().json.weekInfo.fyLabel }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "cachedResultName": "/ (Root folder)"
+        },
+        "options": {}
+      },
+      "id": "f4f27722-782a-4974-9a84-829c8a1da66d",
+      "name": "Create FY Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1424,
+        304
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Your googleDriveOAuth2Api"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ \"name='\" + $('Prepare Report File').first().json.fileName.match(/P\\d{2}/)[0] + \"' and mimeType='application/vnd.google-apps.folder' and trashed=false and '\" + $json.id + \"' in parents\" }}"
+            },
+            {
+              "name": "fields",
+              "value": "files(id,name)"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "aec3b307-7608-4ab3-bc7c-9d6ac578c942",
+      "name": "Search Period Folder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1632,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "condition-period-exists",
+              "leftValue": "={{ $json.files.length }}",
+              "rightValue": "0",
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "aa487273-8c85-461b-ba51-ab58ddf92435",
+      "name": "Period Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1808,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "folder",
+        "name": "={{ $('Process CSV & Build Prompt').first().json.weekInfo.periodLabel }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID"
+        },
+        "folderId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "cachedResultName": "/ (Root folder)"
+        },
+        "options": {}
+      },
+      "id": "428fdb37-dadb-4460-bb7f-6e403b5237e6",
+      "name": "Create Period Folder",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1808,
+        304
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Your googleDriveOAuth2Api"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const reportFile = $('Prepare Report File').first();\nconst folderId = $json.id;\nconst processData = $('Process CSV & Build Prompt').first().json;\nreturn [{\n  json: {\n    folderId,\n    fileName: processData.fileName\n  },\n  binary: reportFile.binary\n}];"
+      },
+      "id": "3e272766-c41c-49e2-b726-10b36794fb90",
+      "name": "Combine for Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "name": "={{ $('Process CSV & Build Prompt').first().json.fileName }}",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "f84fbee2-4193-47fb-824c-9aeaf616cb2f",
+      "name": "Upload Report",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2208,
+        112
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Your googleDriveOAuth2Api"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const processData = $('Process CSV & Build Prompt').first().json;\n\n// Get history from the Process CSV node's stored data\nlet history = processData.historyData || { weeks: [] };\n\nconst newWeekEntry = {\n  fyLabel: processData.weekInfo.fyLabel,\n  periodNum: processData.weekInfo.periodNum,\n  periodLabel: processData.weekInfo.periodLabel,\n  weekNum: processData.weekInfo.weekNum,\n  weekStart: processData.weekInfo.weekStart,\n  weekEnd: processData.weekInfo.weekEnd,\n  totalReviews: processData.metrics.totalReviews,\n  weeklyAvg: processData.metrics.weeklyAvg,\n  deletedThisWeek: processData.metrics.deletedThisWeek,\n  ratingDist: processData.metrics.ratingDist,\n  sources: processData.metrics.sources,\n  generatedAt: new Date().toISOString()\n};\n\nhistory.weeks.push(newWeekEntry);\nconst jsonStr = JSON.stringify(history, null, 2);\nconst buffer = Buffer.from(jsonStr, 'utf-8');\n\nreturn [{\n  json: {\n    fileName: 'metrics_history.json',\n    size: buffer.length\n  },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'application/json',\n      fileName: 'metrics_history.json'\n    }\n  }\n}];"
+      },
+      "id": "b4d31325-503d-45b8-bc3b-add2d61dd78c",
+      "name": "Update Metrics History",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "name": "metrics_history.json",
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "142c6435-a51f-4812-bd30-9ffb82047d33",
+      "name": "Upload Metrics History",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2608,
+        112
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Your googleDriveOAuth2Api"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "mode": "id"
+        }
+      },
+      "id": "1c639e26-64f9-40b6-a326-20bec50723ed",
+      "name": "Archive CSV",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        2800,
+        112
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Your googleDriveOAuth2Api"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize FY folder ID from either search result or create result\nconst item = $input.first();\nlet folderId;\nif (item.json.files && item.json.files.length > 0) {\n  folderId = item.json.files[0].id;\n} else if (item.json.id) {\n  folderId = item.json.id;\n}\nreturn [{ json: { id: folderId, source: 'fy_folder' } }];"
+      },
+      "id": "906ed1bc-6373-48f2-81c6-4c629f5553cc",
+      "name": "Get FY Folder ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1632,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize Period folder ID from either search result or create result\nconst item = $input.first();\nlet folderId;\nif (item.json.files && item.json.files.length > 0) {\n  folderId = item.json.files[0].id;\n} else if (item.json.id) {\n  folderId = item.json.id;\n}\nreturn [{ json: { id: folderId, source: 'period_folder' } }];"
+      },
+      "id": "a376008f-fb0b-4676-9de4-846af95d1afb",
+      "name": "Get Period Folder ID",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        0
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "Filter CSV Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter CSV Files": {
+      "main": [
+        [
+          {
+            "node": "Download CSV",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Download Metrics History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download CSV": {
+      "main": [
+        [
+          {
+            "node": "Merge CSV + History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Metrics History": {
+      "main": [
+        [
+          {
+            "node": "Merge CSV + History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge CSV + History": {
+      "main": [
+        [
+          {
+            "node": "Process CSV & Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process CSV & Build Prompt": {
+      "main": [
+        [
+          {
+            "node": "Call Claude API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call Claude API": {
+      "main": [
+        [
+          {
+            "node": "Extract Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Report": {
+      "main": [
+        [
+          {
+            "node": "Prepare Report File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Report File": {
+      "main": [
+        [
+          {
+            "node": "Search FY Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search FY Folder": {
+      "main": [
+        [
+          {
+            "node": "FY Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "FY Exists?": {
+      "main": [
+        [
+          {
+            "node": "Get FY Folder ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create FY Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create FY Folder": {
+      "main": [
+        [
+          {
+            "node": "Get FY Folder ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Period Folder": {
+      "main": [
+        [
+          {
+            "node": "Period Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Period Exists?": {
+      "main": [
+        [
+          {
+            "node": "Get Period Folder ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Period Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Period Folder": {
+      "main": [
+        [
+          {
+            "node": "Get Period Folder ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine for Upload": {
+      "main": [
+        [
+          {
+            "node": "Upload Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Report": {
+      "main": [
+        [
+          {
+            "node": "Update Metrics History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Metrics History": {
+      "main": [
+        [
+          {
+            "node": "Upload Metrics History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Metrics History": {
+      "main": [
+        [
+          {
+            "node": "Archive CSV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get FY Folder ID": {
+      "main": [
+        [
+          {
+            "node": "Search Period Folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Period Folder ID": {
+      "main": [
+        [
+          {
+            "node": "Combine for Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "b1596f65-7346-40f8-bf3e-11f507656eb5",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "id": "ed7e276c-9e05-4102-9383-97712a62ca1b",
+  "tags": []
+}
