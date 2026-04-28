@@ -1,5 +1,5 @@
 {
-  "name": "Venue Review Report Generator",
+  "name": "HM Feedback Report Generator",
   "nodes": [
     {
       "parameters": {
@@ -13,24 +13,26 @@
         "triggerOn": "specificFolder",
         "folderToWatch": {
           "__rl": true,
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
-          "mode": "id"
+          "value": "<DRIVE_ID_01>",
+          "mode": "list",
+          "cachedResultName": "CSV Imports",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/<DRIVE_ID_01>"
         },
         "event": "fileCreated",
         "options": {}
       },
-      "id": "a0f7ed57-18d5-4ad9-9c0d-de9cb1614b4f",
+      "id": "024363ed-110e-45a8-99f0-034f73ade1c5",
       "name": "Google Drive Trigger",
       "type": "n8n-nodes-base.googleDriveTrigger",
       "typeVersion": 1,
       "position": [
-        -400,
+        -480,
         112
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
-          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
-          "name": "Your googleDriveOAuth2Api"
+          "id": "<CRED_ID_googleDriveOAuth2Api>",
+          "name": "Google Drive account"
         }
       }
     },
@@ -55,12 +57,12 @@
         },
         "options": {}
       },
-      "id": "9828e805-a980-49c6-bded-7c100ddca5cb",
+      "id": "3112ce6f-f599-4466-a04c-9c4bc4d0f669",
       "name": "Filter CSV Files",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        -208,
+        -320,
         112
       ]
     },
@@ -69,74 +71,36 @@
         "operation": "download",
         "fileId": {
           "__rl": true,
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "value": "={{ $('Google Drive Trigger').item.json.id }}",
           "mode": "id"
         },
         "options": {}
       },
-      "id": "8fad0b5f-3c06-485e-a812-3f4723625844",
+      "id": "75dd07c2-30a5-47c7-9ba4-9bb9cdd0bf57",
       "name": "Download CSV",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
       "position": [
-        0,
+        -16,
         0
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
-          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
-          "name": "Your googleDriveOAuth2Api"
+          "id": "<CRED_ID_googleDriveOAuth2Api>",
+          "name": "Google Drive account"
         }
       }
     },
     {
       "parameters": {
-        "operation": "download",
-        "fileId": {
-          "__rl": true,
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
-          "mode": "id"
-        },
-        "options": {}
+        "jsCode": "\n// ============================================\n// HOLEY MOLEY FEEDBACK REPORT - CSV PROCESSOR\n// WITH DYNAMIC FISCAL CALENDAR ENGINE\n// ============================================\n\n// ---- FISCAL CALENDAR ENGINE ----\nconst FY_ANCHOR = new Date('2024-07-01T00:00:00');\nconst FY_DAYS = 364;\nconst MS_PER_DAY = 86400000;\n\n// Helper: set date to end of day for inclusive range checks\nfunction endOfDay(d) {\n  const eod = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);\n  return eod;\n}\n// Helper: set date to start of day\nfunction startOfDay(d) {\n  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);\n}\n\nfunction getFiscalInfo(dateObj) {\n  // Normalize to midnight\n  const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());\n  const daysSinceAnchor = Math.floor((d - FY_ANCHOR) / MS_PER_DAY);\n  \n  const fyIndex = Math.floor(daysSinceAnchor / FY_DAYS);\n  const dayInFY = daysSinceAnchor % FY_DAYS;\n  \n  const fyStartYear = 2024 + fyIndex;\n  const fyLabel = 'FY' + String(fyStartYear % 100).padStart(2, '0') + '-' + String((fyStartYear + 1) % 100).padStart(2, '0');\n  \n  const weekNum = Math.floor(dayInFY / 7) + 1;\n  const periodNum = Math.floor((weekNum - 1) / 4) + 1;\n  const weekInPeriod = ((weekNum - 1) % 4) + 1;\n  \n  const fyStart = new Date(FY_ANCHOR.getTime() + fyIndex * FY_DAYS * MS_PER_DAY);\n  const fyEnd = new Date(fyStart.getTime() + (FY_DAYS - 1) * MS_PER_DAY);\n  \n  const weekStart = new Date(fyStart.getTime() + (weekNum - 1) * 7 * MS_PER_DAY);\n  const weekEnd = new Date(weekStart.getTime() + 6 * MS_PER_DAY);\n  \n  const periodStartWk = (periodNum - 1) * 4 + 1;\n  const periodStart = new Date(fyStart.getTime() + (periodStartWk - 1) * 7 * MS_PER_DAY);\n  const periodEnd = new Date(periodStart.getTime() + 27 * MS_PER_DAY);\n  \n  return {\n    fyLabel, fyStartYear, fyStart, fyEnd,\n    periodNum, periodLabel: 'P' + String(periodNum).padStart(2, '0'),\n    periodStart, periodEnd,\n    weekNum, weekLabel: 'WK' + weekNum,\n    weekInPeriod,\n    weekStart, weekEnd\n  };\n}\n\n\n\nfunction parseCSV(csvText) {\n  // Full CSV parser that handles multi-line quoted fields (reviews with line breaks)\n  const rows = [];\n  const fields = [];\n  let current = '';\n  let inQuotes = false;\n  let i = 0;\n  \n  while (i < csvText.length) {\n    const char = csvText[i];\n    \n    if (inQuotes) {\n      if (char === '\"') {\n        if (i + 1 < csvText.length && csvText[i + 1] === '\"') {\n          // Escaped quote\n          current += '\"';\n          i += 2;\n          continue;\n        } else {\n          // End of quoted field\n          inQuotes = false;\n          i++;\n          continue;\n        }\n      } else {\n        current += char;\n        i++;\n        continue;\n      }\n    }\n    \n    // Not in quotes\n    if (char === '\"') {\n      inQuotes = true;\n      i++;\n    } else if (char === ',') {\n      fields.push(current.trim());\n      current = '';\n      i++;\n    } else if (char === '\\n' || char === '\\r') {\n      // End of row (skip \\r\\n)\n      if (char === '\\r' && i + 1 < csvText.length && csvText[i + 1] === '\\n') {\n        i++;\n      }\n      fields.push(current.trim());\n      current = '';\n      if (fields.some(f => f !== '')) {\n        rows.push([...fields]);\n      }\n      fields.length = 0;\n      i++;\n    } else {\n      current += char;\n      i++;\n    }\n  }\n  \n  // Last row\n  if (current || fields.length > 0) {\n    fields.push(current.trim());\n    if (fields.some(f => f !== '')) {\n      rows.push([...fields]);\n    }\n  }\n  \n  if (rows.length < 2) return [];\n  \n  const header = rows[0];\n  const result = [];\n  for (let r = 1; r < rows.length; r++) {\n    const row = {};\n    header.forEach((col, idx) => {\n      row[col] = rows[r][idx] !== undefined ? rows[r][idx] : '';\n    });\n    // Only include rows that have a Review ID (skip malformed partial rows)\n    if (row['Review ID'] && row['Review ID'].length > 5) {\n      result.push(row);\n    }\n  }\n  return result;\n}\n\nfunction parseDate(dateStr) {\n  if (!dateStr) return null;\n  // Parse dates like \"2026-03-29 06:42:21 PM\" - extract just the date part\n  // to avoid timezone shifts that could move a review to the wrong day\n  const match = dateStr.match(/(\\d{4})-(\\d{2})-(\\d{2})/);\n  if (match) {\n    // Create date at noon local time to avoid any timezone day-shift\n    return new Date(parseInt(match[1]), parseInt(match[2]) - 1, parseInt(match[3]), 12, 0, 0);\n  }\n  const d = new Date(dateStr);\n  return isNaN(d.getTime()) ? null : d;\n}\n\nfunction formatDate(d) {\n  return d.toISOString().split('T')[0];\n}\n\nfunction getOrdinalSuffix(day) {\n  if (day > 3 && day < 21) return 'th';\n  switch (day % 10) {\n    case 1: return 'st';\n    case 2: return 'nd';\n    case 3: return 'rd';\n    default: return 'th';\n  }\n}\n\nfunction formatDateDisplay(d) {\n  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];\n  const day = d.getDate();\n  return months[d.getMonth()] + ' ' + day + getOrdinalSuffix(day);\n}\n\nfunction getDayName(d) {\n  return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()];\n}\n\nfunction computeMetrics(allReviews, weekStart, weekEnd, periodStart, periodEnd, fyStart, fyEnd) {\n  const wsDate = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());\n  const weDate = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());\n  weDate.setHours(23, 59, 59, 999);\n  \n  const psDate = new Date(periodStart.getFullYear(), periodStart.getMonth(), periodStart.getDate());\n  const peDate = new Date(periodEnd.getFullYear(), periodEnd.getMonth(), periodEnd.getDate());\n  peDate.setHours(23, 59, 59, 999);\n  \n  const fysDate = new Date(fyStart.getFullYear(), fyStart.getMonth(), fyStart.getDate());\n  const fyeDate = new Date(fyEnd.getFullYear(), fyEnd.getMonth(), fyEnd.getDate());\n  fyeDate.setHours(23, 59, 59, 999);\n  \n  const weekReviews = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= wsDate && d <= weDate;\n  });\n  \n  const activeWeek = weekReviews.filter(r => !r['Deleted'] || r['Deleted'].trim() === '');\n  const deletedWeek = weekReviews.filter(r => r['Deleted'] && r['Deleted'].trim() !== '');\n  \n  const weeklyAvg = activeWeek.length > 0 \n    ? Math.round((activeWeek.reduce((sum, r) => sum + parseFloat(r['Rating']), 0) / activeWeek.length) * 100) / 100 \n    : 0;\n  \n  const ptdReviews = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= psDate && d <= peDate && true /* deleted already stripped */;\n  });\n  const ptdAvg = ptdReviews.length > 0\n    ? Math.round((ptdReviews.reduce((sum, r) => sum + parseFloat(r['Rating']), 0) / ptdReviews.length) * 100) / 100\n    : 0;\n  \n  const ytdReviews = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= fysDate && d <= fyeDate && true /* deleted already stripped */;\n  });\n  const ytdAvg = ytdReviews.length > 0\n    ? Math.round((ytdReviews.reduce((sum, r) => sum + parseFloat(r['Rating']), 0) / ytdReviews.length) * 100) / 100\n    : 0;\n  \n  const ratingDist = {};\n  for (let i = 5; i >= 1; i--) {\n    const count = activeWeek.filter(r => Math.round(parseFloat(r['Rating'])) === i).length;\n    const pct = activeWeek.length > 0 ? Math.round((count / activeWeek.length) * 100) : 0;\n    ratingDist[i] = { count, pct };\n  }\n  \n  const sources = {};\n  activeWeek.forEach(r => {\n    const src = r['Source'] || 'Unknown';\n    sources[src] = (sources[src] || 0) + 1;\n  });\n  \n  const ptdDeleted = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= psDate && d <= peDate && r['Deleted'] && r['Deleted'].trim() !== '';\n  }).length;\n  \n  const ytdDeleted = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= fysDate && d <= fyeDate && r['Deleted'] && r['Deleted'].trim() !== '';\n  }).length;\n  \n  // ---- STAFF NAME DROP EXTRACTION (canonical roster + alias normalization) ----\n  // Each canonical name in the report = $5 staff payout, so this must be deterministic\n  // and conservative. Source roster: ~/Desktop/hm staff names.rtf (20 staff).\n  const nameDropsThisWeek = {};\n  const nameDropsThisPeriod = {};\n  for (const r of activeWeek) {\n    const drops = extractStaffDrops(r['Review'] || '');\n    for (const name of drops) nameDropsThisWeek[name] = (nameDropsThisWeek[name] || 0) + 1;\n  }\n  for (const r of ptdReviews) {\n    const drops = extractStaffDrops(r['Review'] || '');\n    for (const name of drops) nameDropsThisPeriod[name] = (nameDropsThisPeriod[name] || 0) + 1;\n  }\n  // Final report section: only staff with drops THIS WEEK, sorted desc by week_delta\n  const nameDropsSection = Object.entries(nameDropsThisWeek)\n    .map(([name, week]) => ({\n      name,\n      period_total: nameDropsThisPeriod[name] || 0,\n      week_delta: week,\n    }))\n    .sort((a, b) => b.week_delta - a.week_delta || a.name.localeCompare(b.name));\n  \n  const dailyBreakdown = {};\n  activeWeek.forEach(r => {\n    const d = parseDate(r['Published']);\n    if (!d) return;\n    const dayKey = formatDate(d);\n    if (!dailyBreakdown[dayKey]) {\n      dailyBreakdown[dayKey] = { date: d, positive: 0, neutral: 0, negative: 0, reviews: [] };\n    }\n    const rating = parseFloat(r['Rating']);\n    if (rating >= 4) dailyBreakdown[dayKey].positive++;\n    else if (rating === 3) dailyBreakdown[dayKey].neutral++;\n    else dailyBreakdown[dayKey].negative++;\n    dailyBreakdown[dayKey].reviews.push(r);\n  });\n  \n  return {\n    totalReviews: activeWeek.length,\n    weeklyAvg,\n    ptdAvg,\n    ptdCount: ptdReviews.length,\n    ytdAvg,\n    ytdCount: ytdReviews.length,\n    deletedThisWeek: deletedWeek.length,\n    deletedPTD: ptdDeleted,\n    deletedYTD: ytdDeleted,\n    ratingDist,\n    sources,\n    nameDropsSection,\n    nameDropsThisWeek,\n    nameDropsThisPeriod,\n    dailyBreakdown,\n    activeReviews: activeWeek,\n    deletedReviews: deletedWeek\n  };\n}\n\n// ---- CANONICAL STAFF ROSTER + ALIAS MAP ----\n// Aliases (lowercase) → canonical display name. Source: ~/Desktop/hm staff names.rtf.\nconst ALIAS_MAP = {\n  'alena': 'Alena', 'lena': 'Alena',\n  'andre': 'Andre',\n  'ashley': 'Ashley',\n  'austin': 'Austin',\n  'boon': 'Boon',\n  'brooklynn': 'Brooklynn',\n  'danielle': 'Danielle',\n  'emily': 'Emily',\n  'gabriel': 'Gabriel', 'gabe': 'Gabriel',\n  'jarvis': 'Jarvis',\n  'jay': 'Jay',\n  'jess': 'Jess', 'jessica': 'Jess',\n  'kara': 'Kara',\n  'kayla': 'Kayla',\n  'kurtis': 'Kurtis',\n  'marshal': 'Marshal',\n  'mel': 'Mel', 'melly': 'Mel', 'melanie': 'Mel',\n  'michael': 'Michael',\n  'roman': 'Roman',\n  'sofia': 'Sofia', 'sophia': 'Sofia',\n};\nconst STAFF_TOKENS = Object.keys(ALIAS_MAP).sort((a, b) => b.length - a.length);\nconst STAFF_REGEX = new RegExp('\\\\b(' + STAFF_TOKENS.join('|') + ')\\\\b', 'gi');\n// Canonical names (deduped values from ALIAS_MAP) for fuzzy matching of misspellings\nconst CANONICAL_NAMES = Array.from(new Set(Object.values(ALIAS_MAP)));\n// \"Austin\" the staff name vs \"Austin\" the city — only count when a name-context cue is present\nconst AUSTIN_NAME_CTX = /(?:shout(?:\\s|-)?out\\s+to|thanks?\\s+(?:to\\s+)?|named?\\s+|ask(?:ed|ing)?\\s+for\\s+|helped\\s+by\\s+|served\\s+by\\s+|bartender|server|host(?:ess)?|manager|dealer|guide)\\s*[:,-]?\\s*Austin\\b|\\bAustin\\s+(?:was|is|did|made|helped|served|hosted|guided|rocked|killed)/i;\n\n// Levenshtein edit distance — used to forgive misspellings of staff names\n// (e.g., \"Romon was great\" → Roman, \"Sophia made the drinks\" → Sofia).\nfunction levenshtein(a, b) {\n  if (a === b) return 0;\n  const al = a.length, bl = b.length;\n  if (al === 0) return bl;\n  if (bl === 0) return al;\n  const v0 = new Array(bl + 1);\n  const v1 = new Array(bl + 1);\n  for (let i = 0; i <= bl; i++) v0[i] = i;\n  for (let i = 0; i < al; i++) {\n    v1[0] = i + 1;\n    for (let j = 0; j < bl; j++) {\n      const cost = a[i] === b[j] ? 0 : 1;\n      v1[j + 1] = Math.min(v1[j] + 1, v0[j + 1] + 1, v0[j] + cost);\n    }\n    for (let j = 0; j <= bl; j++) v0[j] = v1[j];\n  }\n  return v0[bl];\n}\n\n// Capture words used in clear name contexts so we can fuzzy-match misspellings safely.\n// We only fuzzy-match within these patterns to avoid matching random capitalized words.\nconst NAME_CTX_REGEXES = [\n  // \"{Name} was great\", \"{Name} helped us\", \"{Name} hosted\", etc.\n  /\\b([A-Z][a-z]{3,})\\s+(?:was|is|were|seemed|made|made\\s+us|made\\s+sure|helped|served|hosted|guided|crushed|nailed|killed|treated|recommended|suggested|brought|took|took\\s+care|kept|rocked)\\b/g,\n  // \"shoutout to {Name}\", \"thanks to {Name}\", \"credit to {Name}\"\n  /(?:shout(?:\\s|-)?out\\s+to|thanks?\\s+to|big\\s+thanks?\\s+to|credit\\s+to|kudos\\s+to)\\s+([A-Z][a-z]{3,})\\b/gi,\n  // \"ask for {Name}\" / \"asked for {Name}\"\n  /\\bask(?:ed|ing)?\\s+for\\s+([A-Z][a-z]{3,})\\b/gi,\n  // \"our bartender {Name}\", \"named {Name}\", \"by {Name}\"\n  /\\b(?:our|the|with|by|named?)\\s+(?:bartender|server|host|hostess|manager|dealer|guide|mc|staff)\\s+([A-Z][a-z]{3,})\\b/gi,\n  // \"{Name} the bartender\", \"{Name} our server\"\n  /\\b([A-Z][a-z]{3,})\\s+(?:the\\s+|our\\s+)?(?:bartender|server|host|hostess|manager|dealer|guide)\\b/g,\n];\n\nfunction fuzzyMatchCanonical(word) {\n  const wl = word.toLowerCase();\n  if (ALIAS_MAP[wl]) return ALIAS_MAP[wl];\n  // Skip very short words — too easy to false-match (Jay/Mel)\n  if (wl.length < 4) return null;\n  let best = null, bestDist = Infinity;\n  for (const canonical of CANONICAL_NAMES) {\n    const cl = canonical.toLowerCase();\n    if (Math.abs(cl.length - wl.length) > 2) continue;\n    const d = levenshtein(wl, cl);\n    if (d < bestDist) { bestDist = d; best = canonical; }\n  }\n  // Conservative threshold: 1 edit for short names (4-6 chars), 2 for longer (7+)\n  const threshold = wl.length >= 7 ? 2 : 1;\n  return bestDist <= threshold ? best : null;\n}\n\nfunction extractStaffDrops(text) {\n  if (!text) return new Set();\n  const found = new Set();\n  // Pass 1: exact alias regex (handles correctly-spelled names anywhere in text)\n  for (const m of text.matchAll(STAFF_REGEX)) {\n    const canonical = ALIAS_MAP[m[1].toLowerCase()];\n    if (!canonical) continue;\n    if (canonical === 'Austin' && !AUSTIN_NAME_CTX.test(text)) continue;\n    found.add(canonical);\n  }\n  // Pass 2: fuzzy match misspelled names, but ONLY when they appear in a name context.\n  // Restricting to context patterns keeps false-positives down (random capitalized words don't fuzzy-match).\n  for (const re of NAME_CTX_REGEXES) {\n    re.lastIndex = 0;\n    let m;\n    while ((m = re.exec(text)) !== null) {\n      const canonical = fuzzyMatchCanonical(m[1]);\n      if (!canonical) continue;\n      if (canonical === 'Austin' && !AUSTIN_NAME_CTX.test(text)) continue;\n      found.add(canonical);\n    }\n  }\n  return found;\n}\n\nfunction formatAuthorName(author) {\n  if (!author) return 'Anonymous';\n  const parts = author.trim().split(/\\s+/);\n  if (parts.length === 0) return 'Anonymous';\n  if (parts.length === 1) return parts[0];\n  return parts[0] + ' ' + parts[1][0] + '.';\n}\n\n// Read CSV data — track NEW csv vs MASTER csv separately\nconst items = $input.all();\nlet newCsvText = '';   // From the uploaded CSV\nlet reportMemoryData = [];  // From report_memory.json (item 0 = Download CSV)\nlet masterCsvText = ''; // From master_reviews.csv (item 1 = Download Master)\n\nfor (let i = 0; i < items.length; i++) {\n  const item = items[i];\n  if (item.binary) {\n    for (const key of Object.keys(item.binary)) {\n      try {\n        const buffer = await helpers.getBinaryDataBuffer(i, key);\n        const text = buffer.toString('utf-8');\n        if (text && text.includes(',') && (text.toLowerCase().includes('review') || text.toLowerCase().includes('rating') || text.toLowerCase().includes('published'))) {\n          if (i === 0 && !newCsvText) {\n            newCsvText = text;  // First item = new CSV from trigger\n          } else if (!masterCsvText) {\n            masterCsvText = text; // Second item = master\n          }\n        } else if (text.trim().startsWith('[') && text.includes('generatedAt')) {\n          // This is the report memory JSON\n          try { reportMemoryData = JSON.parse(text); } catch(e) {}\n        }\n      } catch(e) {\n        const binaryObj = item.binary[key];\n        if (binaryObj.data && typeof binaryObj.data === 'string' && binaryObj.data.length > 100) {\n          try {\n            const text = Buffer.from(binaryObj.data, 'base64').toString('utf-8');\n            if (text && text.includes(',')) {\n              if (i === 0 && !newCsvText) newCsvText = text;\n              else if (!masterCsvText) masterCsvText = text;\n            }\n          } catch(e2) {}\n        }\n      }\n    }\n  }\n}\n\nif (!newCsvText) {\n  throw new Error('No new CSV data found in uploaded file');\n}\n\n// Parse the NEW CSV to determine report week\nconst newReviewsRaw = parseCSV(newCsvText);\nconst newReviews = newReviewsRaw.filter(r => !r['Deleted'] || r['Deleted'].trim() === '');\nif (newReviews.length === 0) {\n  throw new Error('No reviews found in uploaded CSV');\n}\n\n// Find the date range of the NEW reviews (this determines the report week)\nconst newDates = newReviews.map(r => parseDate(r['Published'])).filter(d => d !== null);\nnewDates.sort((a, b) => a - b);\nconst newLatestDate = newDates[newDates.length - 1];\nconst newEarliestDate = newDates[0];\n\n// Parse master CSV for comparison data\nconst masterReviews = masterCsvText ? parseCSV(masterCsvText) : [];\n\n// Merge ALL reviews (new + master), deduplicate by Review ID\nconst reviewMap = new Map();\nconst allParsed = [...masterReviews, ...newReviews];\nfor (const r of allParsed) {\n  const id = r['Review ID'];\n  if (!id) continue;\n  const existing = reviewMap.get(id);\n  if (!existing) {\n    reviewMap.set(id, r);\n  } else {\n    const existingDate = parseDate(existing['Updated'] || existing['Published']);\n    const newDate = parseDate(r['Updated'] || r['Published']);\n    if (newDate && existingDate && newDate > existingDate) {\n      reviewMap.set(id, r);\n    }\n  }\n}\nconst allReviewsRaw = Array.from(reviewMap.values());\n// Strip deleted reviews entirely — they don't exist for any calculation\nconst allReviews = allReviewsRaw.filter(r => !r['Deleted'] || r['Deleted'].trim() === '');\n\n// Build merged CSV for saving as master\nconst firstCsv = newCsvText || masterCsvText;\nconst firstNewline = firstCsv.indexOf('\\n');\nconst headerLine = firstCsv.substring(0, firstNewline > 0 ? firstNewline : 200).replace(/\\r/g, '');\nconst headers = headerLine || Object.keys(allReviews[0] || {}).join(',');\nconst csvRows = [headers];\nfor (const r of allReviews) {\n  const row = Object.values(r).map(v => {\n    const s = String(v || '');\n    return s.includes(',') || s.includes('\\n') || s.includes('\"') ? '\"' + s.replace(/\"/g, '\"\"') + '\"' : s;\n  });\n  csvRows.push(row.join(','));\n}\nconst mergedCsvText = csvRows.join('\\n');\n\nif (allReviews.length === 0) {\n  throw new Error('No reviews found after parsing ' + csvTexts.length + ' CSV files');\n}\n// ============================================\n\n// Report week determined by NEW CSV's dates (newLatestDate set above)\nconst fiscalInfo = getFiscalInfo(newLatestDate);\nconst { fyLabel, fyStart, fyEnd, periodNum, periodLabel, periodStart, periodEnd, weekNum, weekStart, weekEnd } = fiscalInfo;\n\nconst metrics = computeMetrics(allReviews, weekStart, weekEnd, periodStart, periodEnd, fyStart, fyEnd);\n\n\n// All-time average from ALL non-deleted reviews in CSV\nconst allTimeActive = allReviews.filter(r => !r['Deleted'] || r['Deleted'].trim() === '');\nmetrics.allTimeAvg = allTimeActive.length > 0\n  ? Math.round((allTimeActive.reduce((s, r) => s + parseFloat(r['Rating']), 0) / allTimeActive.length) * 100) / 100\n  : 0;\nmetrics.allTimeCount = allTimeActive.length;\n\n// YTD average as of LAST WEEK (excludes this week's reviews)\nconst ytdLwReviews = allReviews.filter(r => {\n  const d = parseDate(r['Published']);\n  return d && d >= startOfDay(fyStart) && d < startOfDay(weekStart)\n    && true /* deleted already stripped */;\n});\nmetrics.ytdLastWeekAvg = ytdLwReviews.length > 0\n  ? Math.round((ytdLwReviews.reduce((s, r) => s + parseFloat(r['Rating']), 0) / ytdLwReviews.length) * 100) / 100\n  : null;\n\n// PTD average as of LAST WEEK (excludes this week's reviews)\nconst ptdLwReviews = allReviews.filter(r => {\n  const d = parseDate(r['Published']);\n  return d && d >= startOfDay(periodStart)\n    && d < startOfDay(weekStart)\n    && true /* deleted already stripped */;\n});\nmetrics.ptdLastWeekAvg = ptdLwReviews.length > 0\n  ? Math.round((ptdLwReviews.reduce((s, r) => s + parseFloat(r['Rating']), 0) / ptdLwReviews.length) * 100) / 100\n  : null;\n\nconst wsDisplay = formatDateDisplay(weekStart);\nconst weDisplay = formatDateDisplay(weekEnd);\n\n// Compute PRIOR WEEK metrics directly from CSV\nconst priorWeekStart = startOfDay(new Date(weekStart.getTime() - 7 * MS_PER_DAY));\nconst priorWeekEnd = endOfDay(new Date(weekEnd.getTime() - 7 * MS_PER_DAY));\nconst priorWeekReviews = allReviews.filter(r => {\n  const d = parseDate(r['Published']);\n  return d && d >= priorWeekStart && d <= priorWeekEnd && true /* deleted already stripped */;\n});\nlet priorWeekMetrics = null;\nif (priorWeekReviews.length > 0) {\n  const pwAvg = Math.round((priorWeekReviews.reduce((s, r) => s + parseFloat(r['Rating']), 0) / priorWeekReviews.length) * 100) / 100;\n  // Build rating distribution for prior week\n  const pwRatingDist = {};\n  for (let s = 1; s <= 5; s++) {\n    pwRatingDist[s] = { count: priorWeekReviews.filter(r => Math.round(parseFloat(r['Rating'])) === s).length };\n  }\n  priorWeekMetrics = { totalReviews: priorWeekReviews.length, weeklyAvg: pwAvg, ratingDist: pwRatingDist };\n}\n\n// Compute PRIOR PERIOD metrics directly from CSV\nconst priorPeriodNum = periodNum > 1 ? periodNum - 1 : 13;\nconst priorPeriodFyLabel = periodNum > 1 ? fyLabel : 'FY' + String((fiscalInfo.fyStartYear - 1) % 100).padStart(2, '0') + '-' + String(fiscalInfo.fyStartYear % 100).padStart(2, '0');\nconst priorPeriodStartWk = (priorPeriodNum - 1) * 4 + 1;\nconst priorPeriodFyStart = periodNum > 1 ? fyStart : new Date(fyStart.getTime() - FY_DAYS * MS_PER_DAY);\nconst ppStart = new Date(priorPeriodFyStart.getTime() + (priorPeriodStartWk - 1) * 7 * MS_PER_DAY);\nconst ppEnd = new Date(ppStart.getTime() + 27 * MS_PER_DAY);\nconst ppStartDay = startOfDay(ppStart);\nconst ppEndDay = endOfDay(ppEnd);\nconst priorPeriodReviews = allReviews.filter(r => {\n  const d = parseDate(r['Published']);\n  return d && d >= ppStartDay && d <= ppEndDay && true /* deleted already stripped */;\n});\nlet priorPeriodMetrics = null;\nlet priorPeriodNameDrops = {};\nlet priorPeriodThemes = {};\nif (priorPeriodReviews.length > 0) {\n  const ppAvg = Math.round((priorPeriodReviews.reduce((s, r) => s + parseFloat(r['Rating']), 0) / priorPeriodReviews.length) * 100) / 100;\n  // Name drops in prior period (for delta comparison)\n  for (const r of priorPeriodReviews) {\n    const drops = extractStaffDrops(r['Review'] || '');\n    for (const name of drops) priorPeriodNameDrops[name] = (priorPeriodNameDrops[name] || 0) + 1;\n  }\n  // Theme keyword counts in prior period (for actionable trend deltas)\n  const themeKeywords = ['staff', 'bartender', 'service', 'food', 'drinks', 'golf', 'darts', 'karaoke', 'atmosphere', 'vibe', 'fun', 'price', 'expensive', 'crowded', 'wait', 'music', 'birthday', 'group', 'rude', 'slow'];\n  priorPeriodReviews.forEach(r => {\n    const text = (r['Review'] || '').toLowerCase();\n    themeKeywords.forEach(kw => {\n      if (text.includes(kw)) priorPeriodThemes[kw] = (priorPeriodThemes[kw] || 0) + 1;\n    });\n  });\n  priorPeriodMetrics = { totalReviews: priorPeriodReviews.length, weeklyAvg: ppAvg, periodLabel: 'P' + String(priorPeriodNum).padStart(2, '0') };\n}\n\n// PTD history (other weeks in current period before this week)\nlet ptdHistoryMetrics = null;\nconst otherPtdReviews = allReviews.filter(r => {\n  const d = parseDate(r['Published']);\n  return d && d >= startOfDay(periodStart) && d < startOfDay(weekStart) && true /* deleted already stripped */;\n});\nif (otherPtdReviews.length > 0) {\n  const ptdAvg = Math.round((otherPtdReviews.reduce((s, r) => s + parseFloat(r['Rating']), 0) / otherPtdReviews.length) * 100) / 100;\n  ptdHistoryMetrics = { totalReviews: otherPtdReviews.length, weeklyAvg: ptdAvg };\n}\n\n\n// ═══════════════════════════════════════════════\n// HISTORICAL WEEKLY ANALYSIS (last 8 weeks from CSV)\n// Gives Claude context for trends and actionable insights\n// ═══════════════════════════════════════════════\nconst weeklyHistory = [];\nfor (let w = 0; w < 8; w++) {\n  const wkStart = new Date(weekStart.getTime() - w * 7 * MS_PER_DAY);\n  const wkEnd = new Date(wkStart.getTime() + 6 * MS_PER_DAY);\n  wkEnd.setHours(23, 59, 59, 999);\n  const wkReviews = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= wkStart && d <= wkEnd && true /* deleted already stripped */;\n  });\n  if (wkReviews.length > 0) {\n    const avg = Math.round((wkReviews.reduce((s, r) => s + parseFloat(r['Rating']), 0) / wkReviews.length) * 100) / 100;\n    const stars5 = wkReviews.filter(r => Math.round(parseFloat(r['Rating'])) === 5).length;\n    const detract = wkReviews.filter(r => parseFloat(r['Rating']) <= 2).length;\n    // Top themes from this week\n    const themes = {};\n    wkReviews.forEach(r => {\n      const text = (r['Review'] || '').toLowerCase();\n      ['staff', 'bartender', 'service', 'food', 'drinks', 'golf', 'darts', 'karaoke', 'atmosphere', 'vibe', 'fun', 'price', 'expensive', 'crowded', 'wait', 'music'].forEach(kw => {\n        if (text.includes(kw)) themes[kw] = (themes[kw] || 0) + 1;\n      });\n    });\n    const topThemes = Object.entries(themes).sort((a,b) => b[1]-a[1]).slice(0, 5).map(([k,v]) => k + '(' + v + ')').join(', ');\n    weeklyHistory.push({\n      weekLabel: 'WK' + getFiscalInfo(wkStart).weekNum,\n      start: formatDate(wkStart),\n      end: formatDate(wkEnd),\n      count: wkReviews.length,\n      avg,\n      stars5pct: Math.round(stars5 / wkReviews.length * 100),\n      detractors: detract,\n      themes: topThemes || 'none'\n    });\n  }\n}\n\n// Compute OVERALL weekly average across all weeks in the CSV\nconst allWeeklyAvgs = [];\nlet scanDate = new Date(allReviews.reduce((earliest, r) => {\n  const d = parseDate(r['Published']);\n  return d && d < earliest ? d : earliest;\n}, new Date()).getTime());\n// Round to Monday\nscanDate.setDate(scanDate.getDate() - scanDate.getDay() + 1);\nconst endScan = new Date(weekEnd.getTime());\nwhile (scanDate < endScan) {\n  const scanEnd = new Date(scanDate.getTime() + 6 * MS_PER_DAY);\n  scanEnd.setHours(23, 59, 59, 999);\n  const wkR = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= scanDate && d <= scanEnd && true /* deleted already stripped */;\n  });\n  if (wkR.length > 0) {\n    allWeeklyAvgs.push({\n      count: wkR.length,\n      avg: wkR.reduce((s, r) => s + parseFloat(r['Rating']), 0) / wkR.length\n    });\n  }\n  scanDate = new Date(scanDate.getTime() + 7 * MS_PER_DAY);\n}\nconst overallWeeklyAvgRating = allWeeklyAvgs.length > 0\n  ? Math.round((allWeeklyAvgs.reduce((s, w) => s + w.avg, 0) / allWeeklyAvgs.length) * 100) / 100\n  : 0;\nconst overallWeeklyAvgCount = allWeeklyAvgs.length > 0\n  ? Math.round(allWeeklyAvgs.reduce((s, w) => s + w.count, 0) / allWeeklyAvgs.length)\n  : 0;\nmetrics.overallWeeklyAvgRating = overallWeeklyAvgRating;\nmetrics.overallWeeklyAvgCount = overallWeeklyAvgCount;\n\n\n// ── PRIOR WEEK full review details (for 2-week analysis) ──\nlet priorWeekReviewList = '';\nif (priorWeekReviews.length > 0) {\n  priorWeekReviewList = '\\nPRIOR WEEK REVIEWS (' + formatDate(priorWeekStart) + ' to ' + formatDate(priorWeekEnd) + ', ' + priorWeekReviews.length + ' reviews, avg ' + priorWeekMetrics.weeklyAvg + '★):\\n';\n  priorWeekReviews.forEach(r => {\n    const author = formatAuthorName(r['Author']);\n    const rating = parseFloat(r['Rating']);\n    const source = r['Source'] || 'Unknown';\n    const text = r['Review'] || '(no comment)';\n    priorWeekReviewList += '- ' + author + ' (' + rating + '★ ' + source + '): ' + text.substring(0, 200) + '\\n';\n  });\n}\n\nconst promoters = metrics.activeReviews.filter(r => parseFloat(r['Rating']) >= 4);\nconst neutrals = metrics.activeReviews.filter(r => Math.round(parseFloat(r['Rating'])) === 3);\nconst detractors = metrics.activeReviews.filter(r => parseFloat(r['Rating']) <= 2);\n\nfunction buildReviewList(reviews) {\n  return reviews.map(r => {\n    const author = formatAuthorName(r['Author']);\n    const rating = parseFloat(r['Rating']);\n    const source = r['Source'] || 'Unknown';\n    const date = r['Published'] ? r['Published'].split(' ')[0] : '';\n    const text = r['Review'] || '(no comment)';\n    return '- ' + author + ' (' + rating + '★ ' + source + ', ' + date + '): ' + text;\n  }).join('\\n');\n}\n\nlet comparisonStr = '';\nif (priorWeekMetrics) {\n  const changeReviews = metrics.totalReviews - priorWeekMetrics.totalReviews;\n  const arrow = changeReviews >= 0 ? '↑' : '↓';\n  const changeRating = metrics.weeklyAvg - priorWeekMetrics.weeklyAvg;\n  const ratingArrow = changeRating >= 0 ? '↑' : '↓';\n  comparisonStr += '\\n- Prior Week: ' + priorWeekMetrics.totalReviews + ' reviews at ' + priorWeekMetrics.weeklyAvg + '★ (' + arrow + Math.abs(changeReviews) + ' reviews, rating: ' + ratingArrow + Math.abs(changeRating).toFixed(2) + ')';\n}\ncomparisonStr += '\\n- Overall Weekly Average (all ' + allWeeklyAvgs.length + ' weeks): ' + overallWeeklyAvgRating + '★, ~' + overallWeeklyAvgCount + ' reviews/week';\ncomparisonStr += '\\n- This week vs overall: ' + (metrics.weeklyAvg >= overallWeeklyAvgRating ? '↑' : '↓') + ' ' + Math.abs(metrics.weeklyAvg - overallWeeklyAvgRating).toFixed(2) + ' from the weekly average';\nif (priorPeriodMetrics) {\n  comparisonStr += '\\n- Prior Period (' + priorPeriodMetrics.periodLabel + '): ' + priorPeriodMetrics.totalReviews + ' reviews at ' + priorPeriodMetrics.weeklyAvg + '★';\n  comparisonStr += '\\n- ' + periodLabel + ' to date vs ' + priorPeriodMetrics.periodLabel + ': ' + (metrics.ptdAvg >= priorPeriodMetrics.weeklyAvg ? '↑' : '↓') + ' ' + Math.abs(metrics.ptdAvg - priorPeriodMetrics.weeklyAvg).toFixed(2);\n}\nif (metrics.ytdLastWeekAvg !== null) {\n  comparisonStr += '\\n- YTD last week: ' + metrics.ytdLastWeekAvg + '★ → this week: ' + metrics.ytdAvg + '★ (' + (metrics.ytdAvg >= metrics.ytdLastWeekAvg ? '↑' : '↓') + ' ' + Math.abs(metrics.ytdAvg - metrics.ytdLastWeekAvg).toFixed(3) + ')';\n}\n\n// 8-week trend summary for Claude\nlet trendSummary = '\\n\\nRECENT 8-WEEK TREND (most recent first):\\n';\nweeklyHistory.forEach(w => {\n  trendSummary += w.weekLabel + ' (' + w.start + '): ' + w.count + ' reviews, ' + w.avg + '★, 5★ rate: ' + w.stars5pct + '%, detractors: ' + w.detractors + ', themes: ' + w.themes + '\\n';\n});\ncomparisonStr += trendSummary;\n\n\n// Build dynamic memory context from past reports\nlet historyContext = '';\nif (reportMemoryData.length > 0) {\n  historyContext = 'PAST REPORT SUMMARIES (' + reportMemoryData.length + ' reports in memory):\\n';\n  reportMemoryData.slice(-12).forEach(r => {\n    historyContext += '- ' + r.fy + ' ' + r.period + ' WK' + r.week + ' (' + r.dates + '): ' + r.reviews + ' reviews, avg ' + r.avg + '\\n';\n    if (r.executive) historyContext += '  Summary: ' + r.executive + '\\n';\n    if (r.positiveTrends && r.positiveTrends.length) historyContext += '  Positive: ' + r.positiveTrends.join('; ') + '\\n';\n    if (r.negativeTrends && r.negativeTrends.length) historyContext += '  Negative: ' + r.negativeTrends.join('; ') + '\\n';\n  });\n  historyContext += '\\nRECURRING PATTERNS FROM 76 PAST REPORTS:\\n';\n  historyContext += 'Top positives: staff (41 weeks), fun (30), atmosphere (24), events (22), groups (21), golf (20), vibe (18), food (16)\\n';\n  historyContext += 'Top negatives: value/pricing (14), consistency (13), booking (12), wait times (12), refund (6)\\n';\n  historyContext += '\\nUSE THIS TO: reference evolving patterns, note improvements, make actionable recommendations that BUILD on past insights.\\n';\n} else {\n  historyContext = 'RECURRING PATTERNS FROM 76 PAST REPORTS:\\nTop positives: staff (41 weeks), fun (30), atmosphere (24), events (22), groups (21), golf (20), vibe (18), food (16)\\nTop negatives: value/pricing (14), consistency (13), booking (12), wait times (12), refund (6)\\nUse these patterns for context in your analysis.\\n';\n}\n\nconst claudePrompt = 'You are generating a weekly customer feedback report for Holey Moley Austin (a mini golf bar venue). The biweekly guest experience meeting covers the LAST 2 WEEKS, so always compare and contrast this week vs the prior week in your analysis. You have access to historical context from 76 past reports — use it to identify trends, patterns, and make actionable recommendations that BUILD on past insights.\\\\n\\\\n' +\n'REPORT PERIOD: Week ' + weekNum + ' (' + periodLabel + ') — ' + wsDisplay + ' – ' + weDisplay + '\\\\n' +\n'FISCAL INFO: ' + fyLabel + '\\\\n\\\\n' +\n'COMPUTED METRICS (use these exact numbers):\\\\n' +\n'- Total Reviews (active, non-deleted): ' + metrics.totalReviews + '\\\\n' +\n'- Weekly Average Rating: ' + metrics.weeklyAvg + '\\\\n' +\n'- PTD Average (' + periodLabel + '): ' + metrics.ptdAvg + ' (' + metrics.ptdCount + ' reviews)\\\\n' +\n'- YTD Average (' + fyLabel + '): ' + metrics.ytdAvg + ' (' + metrics.ytdCount + ' reviews)\\\\n' +\n'- Deleted this week: ' + metrics.deletedThisWeek + '\\\\n' +\n'- Deleted ' + periodLabel + ' to date: ' + metrics.deletedPTD + '\\\\n' +\n'- Deleted ' + fyLabel + ' to date: ' + metrics.deletedYTD + '\\\\n' +\n'- Response Rate: 100%\\\\n' +\n'- Response Time: < 1 day\\\\n\\\\n' +\n'RATING DISTRIBUTION (non-deleted):\\\\n' +\nObject.entries(metrics.ratingDist).map(([r,v]) => r + '★ – ' + v.count + ' (' + v.pct + '%%)').join('\\\\n') + '\\\\n\\\\n' +\n'SOURCES (non-deleted):\\\\n' +\nObject.entries(metrics.sources).map(([s,c]) => s + ' – ' + c).join('\\\\n') + '\\\\n\\\\n' +\n(metrics.deletedThisWeek > 0 ? 'DELETED REVIEWS (' + metrics.deletedThisWeek + ' total, excluded from all ratings):\\\\n' + \n  metrics.deletedReviews.map(r => '- ' + formatAuthorName(r['Author']) + ' (' + r['Rating'] + '★ ' + r['Source'] + '): ' + (r['Review'] || '(no comment)')).join('\\\\n') + '\\\\n\\\\n' : '') +\n'PROMOTER REVIEWS (4-5★):\\\\n' +\n(promoters.length > 0 ? buildReviewList(promoters) : 'None this week') + '\\\\n\\\\n' +\n'NEUTRAL REVIEWS (3★):\\\\n' +\n(neutrals.length > 0 ? buildReviewList(neutrals) : 'None this week') + '\\\\n\\\\n' +\n'DETRACTOR REVIEWS (1-2★):\\\\n' +\n(detractors.length > 0 ? buildReviewList(detractors) : 'None this week') + '\\\\n\\\\n' +\n'STAFF NAME DROPS (deterministic — already extracted from canonical roster, do NOT generate this section yourself):\\\\n' +\n(metrics.nameDropsSection.length > 0\n  ? metrics.nameDropsSection.map(d => '- ' + d.name + ': ' + d.period_total + ' period-to-date (+' + d.week_delta + ' this week)').join('\\\\n')\n  : 'No staff mentioned by name this week') + '\\\\n\\\\n' +\n'PRIOR PERIOD CONTEXT (' + (priorPeriodMetrics ? priorPeriodMetrics.periodLabel : 'P??') + ', use to anchor actionable insights and compare deltas):\\\\n' +\n'- Prior period name drops: ' + (Object.keys(priorPeriodNameDrops).length > 0\n  ? Object.entries(priorPeriodNameDrops).sort((a,b) => b[1]-a[1]).map(([n,c]) => n + '(' + c + ')').join(', ')\n  : 'none') + '\\\\n' +\n'- Prior period theme keyword counts: ' + (Object.keys(priorPeriodThemes).length > 0\n  ? Object.entries(priorPeriodThemes).sort((a,b) => b[1]-a[1]).slice(0, 12).map(([k,v]) => k + '(' + v + ')').join(', ')\n  : 'none') + '\\\\n' +\n'- USE THIS to call out shifts: which staff are still showing up vs falling off, which themes are escalating or improving, what should the GM act on THIS WEEK that builds on last period\\\\u2019s patterns.\\\\n\\\\n' +\n'COMPARISONS FROM HISTORY:\\\\n' +\n(comparisonStr || 'No prior week data available (this may be the first week in the CSV)') + '\\\\n\\\\n' +\npriorWeekReviewList + '\\\\n' +\n'DAILY BREAKDOWN:\\\\n' +\nObject.entries(metrics.dailyBreakdown).sort().map(([day, info]) => {\n  const dayName = getDayName(info.date);\n  return dayName + ' ' + day + ': ' + info.positive + ' positive, ' + info.neutral + ' neutral, ' + info.negative + ' negative';\n}).join('\\\\n') + '\\\\n\\\\n' +\n'---\\\\n\\\\n' +\nhistoryContext + '\\\\n\\\\n---\\\\n\\\\n' +\n'RETURN ONLY VALID JSON (no markdown, no code fences). Structure:\\n{\\n' +\n'  \"executive_summary\": \"1-2 sentence narrative summary with volume and rating trends\",\\n' +\n'  \"feedback_breakdown_narrative\": \"Full narrative paragraph. This week received X reviews (delta vs last week), average rating X.XX. Context about rating drivers. Response performance sentence.\",\\n' +\n'  \"review_observations\": {\\n' +\n'    \"promoters\": [\"bullet 1: theme + key detail from review text\", \"bullet 2\", ...],\\n' +\n'    \"neutrals\": [\"bullet text\"] or [\"None this week\"],\\n' +\n'    \"detractors\": [\"bullet 1: issue + specifics from review\", ...]\\n' +\n'  },\\n' +\n'  \"feedback_trends\": {\"positive\": [\"trend grounded in reviews\", ...], \"negative\": [\"trend grounded in reviews\", ...]},\\n' +\n'  \"keyword_trends\": [\\n' +\n'    {\"category\": \"Product / Drinks\", \"positive\": \"keyword (count), keyword (count)\", \"negative\": \"keyword (count) or \\u2014\"},\\n' +\n'    {\"category\": \"Service\", \"positive\": \"...\", \"negative\": \"...\"},\\n' +\n'    {\"category\": \"Location / Atmosphere\", \"positive\": \"...\", \"negative\": \"...\"},\\n' +\n'    {\"category\": \"Value\", \"positive\": \"...\", \"negative\": \"...\"},\\n' +\n'    {\"category\": \"Customer Use Case\", \"positive\": \"...\", \"negative\": \"...\"}\\n' +\n'  ],\\n' +\n'  \"sentiment_by_day\": [{\"day\": \"Mon DD\", \"positive_text\": \"1-line positive themes\", \"negative_text\": \"negative notes or \\u2014\"}, ...],\\n' +\n'  \"focus_points\": {\"keep_doing\": [\"actionable bullet tied to 5-star drivers\", ...], \"improve\": [\"actionable bullet tied to negative reviews\", ...]}\\n' +\n'}\\n\\n' +\n'RULES:\\n' +\n'- keyword_trends: exactly 5 categories. Text with counts like \"food (3)\" not numbers. Use dash if none.\\n' +\n'- sentiment_by_day: only days with reviews. Day format \"Mon DD\" (e.g. \"Dec 8\"). Text descriptions not counts.\\n' +\n'- review_observations: arrays of bullet strings (not objects). Each 1-2 sentences referencing review content.\\n' +\n'- feedback_breakdown_narrative: write the FULL narrative including volume/rating summary and response performance.\\n' +\n'- DO NOT include a name_drops field — staff name drops are extracted deterministically by the workflow, not the LLM.\\n' +\n'- Tone: concise, operational, upbeat but factual. Never invent facts not in reviews.';\n\nconst claudeRequestBody = JSON.stringify({\n  model: 'claude-sonnet-4-20250514',\n  max_tokens: 4096,\n  messages: [{ role: 'user', content: claudePrompt }]\n});\n\n// Ensure exactly 1 item returned with the prompt\nif (!claudePrompt) {\n  throw new Error('Failed to build Claude prompt. CSV text length: ' + csvText.length + ', Reviews: ' + allReviews.length);\n}\n\nreturn [{\n  json: {\n    claudePrompt,\n    claudeRequestBody,\n    metrics: {\n      totalReviews: metrics.totalReviews,\n      weeklyAvg: metrics.weeklyAvg,\n      ptdAvg: metrics.ptdAvg,\n      ptdCount: metrics.ptdCount,\n      ytdAvg: metrics.ytdAvg,\n      ytdCount: metrics.ytdCount,\n      allTimeAvg: metrics.allTimeAvg,\n      allTimeCount: metrics.allTimeCount,\n      overallWeeklyAvgRating: metrics.overallWeeklyAvgRating,\n      overallWeeklyAvgCount: metrics.overallWeeklyAvgCount,\n      ytdLastWeekAvg: metrics.ytdLastWeekAvg,\n      ptdLastWeekAvg: metrics.ptdLastWeekAvg,\n      deletedThisWeek: metrics.deletedThisWeek,\n      deletedPTD: metrics.deletedPTD,\n      deletedYTD: metrics.deletedYTD,\n      ratingDist: metrics.ratingDist,\n      sources: metrics.sources,\n      nameDropsSection: metrics.nameDropsSection,\n      nameDropsThisWeek: metrics.nameDropsThisWeek,\n      nameDropsThisPeriod: metrics.nameDropsThisPeriod\n    },\n    nameDropsSection: metrics.nameDropsSection,\n    comparisons: {\n      priorWeek: priorWeekMetrics,\n      ptdHistory: ptdHistoryMetrics,\n      priorPeriod: priorPeriodMetrics\n    },\n    weekInfo: {\n      fyLabel,\n      periodNum,\n      periodLabel,\n      weekNum,\n      weekStart: formatDate(weekStart),\n      weekEnd: formatDate(weekEnd),\n      weekStartDisplay: wsDisplay,\n      weekEndDisplay: weDisplay\n    },\n    fileName: 'HM ATX Feedback Report ' + fyLabel + ' ' + periodLabel + ' WK' + weekNum + '.docx',\n    historyData: { weeks: [] },\n    reportMemory: reportMemoryData,\n    mergedCsvText,\n    comparisons: {\n      priorWeek: priorWeekMetrics,\n      ptdHistory: ptdHistoryMetrics,\n      priorPeriod: priorPeriodMetrics\n    }\n  }\n}];\n\n"
       },
-      "id": "fba8bfea-7df2-4a8f-958f-f81a5b8826a6",
-      "name": "Download Metrics History",
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
-      "position": [
-        0,
-        208
-      ],
-      "alwaysOutputData": true,
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
-          "name": "Your googleDriveOAuth2Api"
-        }
-      },
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {},
-      "id": "eb864aee-5aca-4bef-a69c-ce986dac0562",
-      "name": "Merge CSV + History",
-      "type": "n8n-nodes-base.merge",
-      "typeVersion": 3,
-      "position": [
-        208,
-        112
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "\n// ============================================\n// VENUE REVIEW REPORT - CSV PROCESSOR\n// WITH DYNAMIC FISCAL CALENDAR ENGINE\n// ============================================\n\n// ---- FISCAL CALENDAR ENGINE ----\nconst FY_ANCHOR = new Date('2024-07-01T00:00:00');\nconst FY_DAYS = 364;\nconst MS_PER_DAY = 86400000;\n\nfunction getFiscalInfo(dateObj) {\n  // Normalize to midnight\n  const d = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());\n  const daysSinceAnchor = Math.floor((d - FY_ANCHOR) / MS_PER_DAY);\n  \n  const fyIndex = Math.floor(daysSinceAnchor / FY_DAYS);\n  const dayInFY = daysSinceAnchor % FY_DAYS;\n  \n  const fyStartYear = 2024 + fyIndex;\n  const fyLabel = 'FY' + String(fyStartYear % 100).padStart(2, '0') + '-' + String((fyStartYear + 1) % 100).padStart(2, '0');\n  \n  const weekNum = Math.floor(dayInFY / 7) + 1;\n  const periodNum = Math.floor((weekNum - 1) / 4) + 1;\n  const weekInPeriod = ((weekNum - 1) % 4) + 1;\n  \n  const fyStart = new Date(FY_ANCHOR.getTime() + fyIndex * FY_DAYS * MS_PER_DAY);\n  const fyEnd = new Date(fyStart.getTime() + (FY_DAYS - 1) * MS_PER_DAY);\n  \n  const weekStart = new Date(fyStart.getTime() + (weekNum - 1) * 7 * MS_PER_DAY);\n  const weekEnd = new Date(weekStart.getTime() + 6 * MS_PER_DAY);\n  \n  const periodStartWk = (periodNum - 1) * 4 + 1;\n  const periodStart = new Date(fyStart.getTime() + (periodStartWk - 1) * 7 * MS_PER_DAY);\n  const periodEnd = new Date(periodStart.getTime() + 27 * MS_PER_DAY);\n  \n  return {\n    fyLabel, fyStartYear, fyStart, fyEnd,\n    periodNum, periodLabel: 'P' + String(periodNum).padStart(2, '0'),\n    periodStart, periodEnd,\n    weekNum, weekLabel: 'WK' + weekNum,\n    weekInPeriod,\n    weekStart, weekEnd\n  };\n}\n\n\n\nfunction parseCSV(csvText) {\n  const lines = csvText.split('\\n');\n  if (lines.length < 2) return [];\n  \n  const header = parseCSVLine(lines[0]);\n  const rows = [];\n  \n  for (let i = 1; i < lines.length; i++) {\n    if (!lines[i].trim()) continue;\n    const values = parseCSVLine(lines[i]);\n    const row = {};\n    header.forEach((col, idx) => {\n      row[col.trim()] = values[idx] ? values[idx].trim() : '';\n    });\n    rows.push(row);\n  }\n  return rows;\n}\n\nfunction parseCSVLine(line) {\n  const result = [];\n  let current = '';\n  let inQuotes = false;\n  \n  for (let i = 0; i < line.length; i++) {\n    const char = line[i];\n    if (char === '\"') {\n      if (inQuotes && i + 1 < line.length && line[i + 1] === '\"') {\n        current += '\"';\n        i++;\n      } else {\n        inQuotes = !inQuotes;\n      }\n    } else if (char === ',' && !inQuotes) {\n      result.push(current);\n      current = '';\n    } else {\n      current += char;\n    }\n  }\n  result.push(current);\n  return result;\n}\n\nfunction parseDate(dateStr) {\n  if (!dateStr) return null;\n  const d = new Date(dateStr);\n  return isNaN(d.getTime()) ? null : d;\n}\n\nfunction formatDate(d) {\n  return d.toISOString().split('T')[0];\n}\n\nfunction getOrdinalSuffix(day) {\n  if (day > 3 && day < 21) return 'th';\n  switch (day % 10) {\n    case 1: return 'st';\n    case 2: return 'nd';\n    case 3: return 'rd';\n    default: return 'th';\n  }\n}\n\nfunction formatDateDisplay(d) {\n  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];\n  const day = d.getDate();\n  return months[d.getMonth()] + ' ' + day + getOrdinalSuffix(day);\n}\n\nfunction getDayName(d) {\n  return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getDay()];\n}\n\nfunction computeMetrics(allReviews, weekStart, weekEnd, periodStart, periodEnd, fyStart, fyEnd) {\n  const wsDate = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate());\n  const weDate = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());\n  weDate.setHours(23, 59, 59, 999);\n  \n  const psDate = new Date(periodStart.getFullYear(), periodStart.getMonth(), periodStart.getDate());\n  const peDate = new Date(periodEnd.getFullYear(), periodEnd.getMonth(), periodEnd.getDate());\n  peDate.setHours(23, 59, 59, 999);\n  \n  const fysDate = new Date(fyStart.getFullYear(), fyStart.getMonth(), fyStart.getDate());\n  const fyeDate = new Date(fyEnd.getFullYear(), fyEnd.getMonth(), fyEnd.getDate());\n  fyeDate.setHours(23, 59, 59, 999);\n  \n  const weekReviews = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= wsDate && d <= weDate;\n  });\n  \n  const activeWeek = weekReviews.filter(r => !r['Deleted'] || r['Deleted'].trim() === '');\n  const deletedWeek = weekReviews.filter(r => r['Deleted'] && r['Deleted'].trim() !== '');\n  \n  const weeklyAvg = activeWeek.length > 0 \n    ? Math.round((activeWeek.reduce((sum, r) => sum + parseFloat(r['Rating']), 0) / activeWeek.length) * 100) / 100 \n    : 0;\n  \n  const ptdReviews = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= psDate && d <= peDate && (!r['Deleted'] || r['Deleted'].trim() === '');\n  });\n  const ptdAvg = ptdReviews.length > 0\n    ? Math.round((ptdReviews.reduce((sum, r) => sum + parseFloat(r['Rating']), 0) / ptdReviews.length) * 100) / 100\n    : 0;\n  \n  const ytdReviews = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= fysDate && d <= fyeDate && (!r['Deleted'] || r['Deleted'].trim() === '');\n  });\n  const ytdAvg = ytdReviews.length > 0\n    ? Math.round((ytdReviews.reduce((sum, r) => sum + parseFloat(r['Rating']), 0) / ytdReviews.length) * 100) / 100\n    : 0;\n  \n  const ratingDist = {};\n  for (let i = 5; i >= 1; i--) {\n    const count = activeWeek.filter(r => Math.round(parseFloat(r['Rating'])) === i).length;\n    const pct = activeWeek.length > 0 ? Math.round((count / activeWeek.length) * 100) : 0;\n    ratingDist[i] = { count, pct };\n  }\n  \n  const sources = {};\n  activeWeek.forEach(r => {\n    const src = r['Source'] || 'Unknown';\n    sources[src] = (sources[src] || 0) + 1;\n  });\n  \n  const ptdDeleted = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= psDate && d <= peDate && r['Deleted'] && r['Deleted'].trim() !== '';\n  }).length;\n  \n  const ytdDeleted = allReviews.filter(r => {\n    const d = parseDate(r['Published']);\n    return d && d >= fysDate && d <= fyeDate && r['Deleted'] && r['Deleted'].trim() !== '';\n  }).length;\n  \n  // Dynamic name detection: find any capitalized word (3+ letters) that looks like a first name\n  // The reviewer who reads the report can remove any false positives\n  const nameMentions = {};\n  const stopWords = new Set([\n    'the','and','but','for','are','was','were','been','being','have','has','had',\n    'will','would','could','should','shall','may','might','can','did','does','done',\n    'not','this','that','these','those','with','from','into','upon','about','after',\n    'before','above','below','between','under','over','through','during','while',\n    'where','when','which','what','who','whom','whose','how','than','then','here',\n    'there','each','every','both','few','more','most','other','some','such','only',\n    'same','also','just','back','been','come','even','give','good','great','just',\n    'know','like','look','make','many','much','need','next','open','part','play',\n    'real','said','take','tell','think','very','want','well','went','work','year',\n    'best','better','came','first','last','long','made','right','still','thing',\n    'time','used','way','our','out','all','any','day','got','her','him','his','its',\n    'let','new','now','off','old','one','own','put','run','say','she','too','try',\n    'two','use','your','they','them','their','mine','ours','yours','really','always',\n    'never','sometimes','maybe','please','thank','thanks','great','amazing','awesome',\n    'wonderful','terrible','horrible','worst','love','loved','loved','hate','hated',\n    'place','night','drinks','food','drink','staff','service','experience','fun',\n    'birthday','party','music','games','golf','mini','course','courses','bar',\n    'bartender','server','host','manager','wait','table','google','yelp','tripadvisor',\n    'definitely','absolutely',\n    'highly','recommend','recommended','visited','visit','went','going','came',\n    'saturday','sunday','monday','tuesday','wednesday','thursday','friday',\n    'january','february','march','april','june','july','august','september',\n    'october','november','december','may'\n  ]);\n  \n  activeWeek.forEach(r => {\n    const text = r['Review'] || '';\n    // Find capitalized words that are 3+ chars and not at sentence start\n    const words = text.match(/(?<=[a-z.,!?;:]\\s+)[A-Z][a-z]{2,}/g) || [];\n    // Also check words after common patterns like \"named\", \"by\", \"our\", \"ask for\", \"shoutout to\"\n    const namedPatterns = text.match(/(?:named|name is|name was|shout ?out to|ask for|helped by|served by|bartender|server|host)\\s+([A-Z][a-z]{2,})/gi) || [];\n    \n    const allNames = [...words];\n    namedPatterns.forEach(match => {\n      const parts = match.split(/\\s+/);\n      const last = parts[parts.length - 1];\n      if (last && last[0] === last[0].toUpperCase()) allNames.push(last);\n    });\n    \n    allNames.forEach(word => {\n      const clean = word.replace(/[^a-zA-Z]/g, '');\n      if (clean.length >= 3 && !stopWords.has(clean.toLowerCase())) {\n        nameMentions[clean] = (nameMentions[clean] || 0) + 1;\n      }\n    });\n  });\n  \n  const dailyBreakdown = {};\n  activeWeek.forEach(r => {\n    const d = parseDate(r['Published']);\n    if (!d) return;\n    const dayKey = formatDate(d);\n    if (!dailyBreakdown[dayKey]) {\n      dailyBreakdown[dayKey] = { date: d, positive: 0, neutral: 0, negative: 0, reviews: [] };\n    }\n    const rating = parseFloat(r['Rating']);\n    if (rating >= 4) dailyBreakdown[dayKey].positive++;\n    else if (rating === 3) dailyBreakdown[dayKey].neutral++;\n    else dailyBreakdown[dayKey].negative++;\n    dailyBreakdown[dayKey].reviews.push(r);\n  });\n  \n  return {\n    totalReviews: activeWeek.length,\n    weeklyAvg,\n    ptdAvg,\n    ptdCount: ptdReviews.length,\n    ytdAvg,\n    ytdCount: ytdReviews.length,\n    deletedThisWeek: deletedWeek.length,\n    deletedPTD: ptdDeleted,\n    deletedYTD: ytdDeleted,\n    ratingDist,\n    sources,\n    nameMentions,\n    dailyBreakdown,\n    activeReviews: activeWeek,\n    deletedReviews: deletedWeek\n  };\n}\n\nfunction formatAuthorName(author) {\n  if (!author) return 'Anonymous';\n  const parts = author.trim().split(/\\s+/);\n  if (parts.length === 0) return 'Anonymous';\n  if (parts.length === 1) return parts[0];\n  return parts[0] + ' ' + parts[1][0] + '.';\n}\n\nconst items = $input.all();\nlet csvText = '';\nlet historyData = { weeks: [] };\n\nfor (const item of items) {\n  if (item.binary) {\n    // Try each binary key (could be 'data', 'file', 'attachment', etc.)\n    for (const key of Object.keys(item.binary)) {\n      try {\n        // n8n stores binary as a reference - use helpers to get buffer\n        const binaryObj = item.binary[key];\n        let text = '';\n        \n        // Method 1: n8n >= 1.x uses await helpers.getBinaryDataBuffer\n        if (typeof helpers !== 'undefined' && helpers.getBinaryDataBuffer) {\n          const buffer = await helpers.getBinaryDataBuffer(items.indexOf(item), key);\n          text = buffer.toString('utf-8');\n        }\n        // Method 2: Direct base64 data property (older n8n or some modes)  \n        else if (binaryObj.data) {\n          text = Buffer.from(binaryObj.data, 'base64').toString('utf-8');\n        }\n        \n        if (!text) continue;\n        \n        const trimmed = text.trim();\n        if (trimmed.startsWith('{') && trimmed.includes('\"weeks\"')) {\n          historyData = JSON.parse(trimmed);\n        } else if (trimmed.includes(',') && (trimmed.toLowerCase().includes('review') || trimmed.toLowerCase().includes('rating') || trimmed.toLowerCase().includes('published'))) {\n          csvText = text;\n        }\n      } catch(e) {\n        // Continue to next binary key\n      }\n    }\n  }\n}\n\nconst allReviews = parseCSV(csvText);\nif (allReviews.length === 0) {\n  return [{ json: { error: 'No reviews found in CSV' } }];\n}\n\nlet latestDate = new Date();\nconst publishedDates = allReviews.map(r => parseDate(r['Published'])).filter(d => d !== null);\nif (publishedDates.length > 0) {\n  publishedDates.sort((a, b) => a - b);\n  latestDate = publishedDates[publishedDates.length - 1];\n}\n\nconst fiscalInfo = getFiscalInfo(latestDate);\nconst { fyLabel, fyStart, fyEnd, periodNum, periodLabel, periodStart, periodEnd, weekNum, weekStart, weekEnd } = fiscalInfo;\n\nconst metrics = computeMetrics(allReviews, weekStart, weekEnd, periodStart, periodEnd, fyStart, fyEnd);\n\nconst wsDisplay = formatDateDisplay(weekStart);\nconst weDisplay = formatDateDisplay(weekEnd);\n\nlet priorWeekMetrics = null;\nif (historyData.weeks && historyData.weeks.length > 0) {\n  const priorWeek = historyData.weeks.find(w => w.weekNum === (weekNum - 1) && w.fyLabel === fyLabel);\n  if (priorWeek) {\n    priorWeekMetrics = priorWeek;\n  }\n}\n\nlet ptdHistoryMetrics = null;\nif (historyData.weeks && historyData.weeks.length > 0) {\n  const periodWeeks = historyData.weeks.filter(w => w.periodNum === periodNum && w.fyLabel === fyLabel && w.weekNum !== weekNum);\n  if (periodWeeks.length > 0) {\n    const totalReviews = periodWeeks.reduce((sum, w) => sum + (w.totalReviews || 0), 0);\n    const avgRating = periodWeeks.length > 0 \n      ? Math.round((periodWeeks.reduce((sum, w) => sum + (w.weeklyAvg || 0), 0) / periodWeeks.length) * 100) / 100\n      : 0;\n    ptdHistoryMetrics = { totalReviews, weeklyAvg: avgRating, weekCount: periodWeeks.length };\n  }\n}\n\nlet priorPeriodMetrics = null;\nif (historyData.weeks && historyData.weeks.length > 0) {\n  const priorPeriodNum = periodNum - 1;\n  const priorPeriodWeeks = historyData.weeks.filter(w => w.periodNum === priorPeriodNum && w.fyLabel === fyLabel);\n  if (priorPeriodWeeks.length > 0) {\n    const totalReviews = priorPeriodWeeks.reduce((sum, w) => sum + (w.totalReviews || 0), 0);\n    const avgRating = priorPeriodWeeks.length > 0\n      ? Math.round((priorPeriodWeeks.reduce((sum, w) => sum + (w.weeklyAvg || 0), 0) / priorPeriodWeeks.length) * 100) / 100\n      : 0;\n    priorPeriodMetrics = { totalReviews, weeklyAvg: avgRating, periodLabel: 'P' + String(priorPeriodNum).padStart(2, '0') };\n  }\n}\n\nconst promoters = metrics.activeReviews.filter(r => parseFloat(r['Rating']) >= 4);\nconst neutrals = metrics.activeReviews.filter(r => Math.round(parseFloat(r['Rating'])) === 3);\nconst detractors = metrics.activeReviews.filter(r => parseFloat(r['Rating']) <= 2);\n\nfunction buildReviewList(reviews) {\n  return reviews.map(r => {\n    const author = formatAuthorName(r['Author']);\n    const rating = parseFloat(r['Rating']);\n    const source = r['Source'] || 'Unknown';\n    const date = r['Published'] ? r['Published'].split(' ')[0] : '';\n    const text = r['Review'] || '(no comment)';\n    return '- ' + author + ' (' + rating + '\u2605 ' + source + ', ' + date + '): ' + text;\n  }).join('\\n');\n}\n\nlet comparisonStr = '';\nif (priorWeekMetrics) {\n  const changeReviews = metrics.totalReviews - priorWeekMetrics.totalReviews;\n  const pctChange = priorWeekMetrics.totalReviews > 0 \n    ? Math.round((changeReviews / priorWeekMetrics.totalReviews) * 100)\n    : 0;\n  const arrow = changeReviews >= 0 ? '\u2191' : '\u2193';\n  const changeRating = metrics.weeklyAvg - priorWeekMetrics.weeklyAvg;\n  const ratingArrow = changeRating >= 0 ? '\u2191' : '\u2193';\n  comparisonStr += '\\n- Prior Week: ' + priorWeekMetrics.totalReviews + ' reviews at ' + priorWeekMetrics.weeklyAvg + '\u2605 (change: ' + arrow + ' ' + Math.abs(changeReviews) + ' reviews / ' + pctChange + '%, rating: ' + ratingArrow + ' ' + Math.abs(changeRating).toFixed(2) + ')';\n}\n\nif (ptdHistoryMetrics) {\n  comparisonStr += '\\n- Period to Date (' + periodLabel + '): avg ' + ptdHistoryMetrics.weeklyAvg + '\u2605 across ' + ptdHistoryMetrics.weekCount + ' prior weeks';\n}\n\nif (priorPeriodMetrics) {\n  comparisonStr += '\\n- Prior Period (' + priorPeriodMetrics.periodLabel + '): ' + priorPeriodMetrics.totalReviews + ' total reviews at ' + priorPeriodMetrics.weeklyAvg + '\u2605';\n}\n\nconst claudePrompt = 'You are generating a weekly customer feedback report for {{VENUE_NAME}} ({{VENUE_DESCRIPTION}}).\\n\\n' +\n'REPORT PERIOD: Week ' + weekNum + ' (' + periodLabel + ') \u2014 ' + wsDisplay + ' \u2013 ' + weDisplay + '\\n' +\n'FISCAL INFO: ' + fyLabel + '\\n\\n' +\n'COMPUTED METRICS (use these exact numbers):\\n' +\n'- Total Reviews (active, non-deleted): ' + metrics.totalReviews + '\\n' +\n'- Weekly Average Rating: ' + metrics.weeklyAvg + '\\n' +\n'- PTD Average (' + periodLabel + '): ' + metrics.ptdAvg + ' (' + metrics.ptdCount + ' reviews)\\n' +\n'- YTD Average (' + fyLabel + '): ' + metrics.ytdAvg + ' (' + metrics.ytdCount + ' reviews)\\n' +\n'- Deleted this week: ' + metrics.deletedThisWeek + '\\n' +\n'- Deleted ' + periodLabel + ' to date: ' + metrics.deletedPTD + '\\n' +\n'- Deleted ' + fyLabel + ' to date: ' + metrics.deletedYTD + '\\n' +\n'- Response Rate: 100%\\n' +\n'- Response Time: < 1 day\\n\\n' +\n'RATING DISTRIBUTION (non-deleted):\\n' +\nObject.entries(metrics.ratingDist).map(([r,v]) => r + '\u2605 \u2013 ' + v.count + ' (' + v.pct + '%)').join('\\n') + '\\n\\n' +\n'SOURCES (non-deleted):\\n' +\nObject.entries(metrics.sources).map(([s,c]) => s + ' \u2013 ' + c).join('\\n') + '\\n\\n' +\n(metrics.deletedThisWeek > 0 ? 'DELETED REVIEWS (' + metrics.deletedThisWeek + ' total, excluded from all ratings):\\n' + \n  metrics.deletedReviews.map(r => '- ' + formatAuthorName(r['Author']) + ' (' + r['Rating'] + '\u2605 ' + r['Source'] + '): ' + (r['Review'] || '(no comment)')).join('\\n') + '\\n\\n' : '') +\n'PROMOTER REVIEWS (4-5\u2605):\\n' +\n(promoters.length > 0 ? buildReviewList(promoters) : 'None this week') + '\\n\\n' +\n'NEUTRAL REVIEWS (3\u2605):\\n' +\n(neutrals.length > 0 ? buildReviewList(neutrals) : 'None this week') + '\\n\\n' +\n'DETRACTOR REVIEWS (1-2\u2605):\\n' +\n(detractors.length > 0 ? buildReviewList(detractors) : 'None this week') + '\\n\\n' +\n'NAME MENTIONS (auto-detected from reviews \u2014 reviewer should verify these are actual staff):\\n' +\n(Object.keys(metrics.nameMentions).length > 0 ? Object.entries(metrics.nameMentions).map(([n,c]) => n + ': ' + c).join('\\n') : 'No staff mentioned by name this week') + '\\n\\n' +\n'COMPARISONS FROM HISTORY:\\n' +\n(comparisonStr || 'No prior data available') + '\\n\\n' +\n'DAILY BREAKDOWN:\\n' +\nObject.entries(metrics.dailyBreakdown).sort().map(([day, info]) => {\n  const dayName = getDayName(info.date);\n  return dayName + ' ' + day + ': ' + info.positive + ' positive, ' + info.neutral + ' neutral, ' + info.negative + ' negative';\n}).join('\\n') + '\\n\\n' +\n'---\\n\\n' +\n'GENERATE THE REPORT USING EXACT METRICS. Format: # FEEDBACK REPORT, ## Venue, ## Week info, ### FEEDBACK BREAKDOWN (with exact numbers), ### REVIEW OBSERVATIONS (4-5\u2605, 3\u2605, 1-2\u2605), ### FEEDBACK TRENDS, ### FOCUS POINTS, ### NAME DROPS';\n\n// Pre-build the full Claude API request body in the Code node\n// so n8n doesn't mangle it in HTTP Request expressions\nconst claudeRequestBody = JSON.stringify({\n  model: 'claude-sonnet-4-20250514',\n  max_tokens: 4096,\n  messages: [{ role: 'user', content: claudePrompt }]\n});\n\nreturn [{\n  json: {\n    claudePrompt,\n    claudeRequestBody,\n    metrics: {\n      totalReviews: metrics.totalReviews,\n      weeklyAvg: metrics.weeklyAvg,\n      ptdAvg: metrics.ptdAvg,\n      ptdCount: metrics.ptdCount,\n      ytdAvg: metrics.ytdAvg,\n      ytdCount: metrics.ytdCount,\n      deletedThisWeek: metrics.deletedThisWeek,\n      deletedPTD: metrics.deletedPTD,\n      deletedYTD: metrics.deletedYTD,\n      ratingDist: metrics.ratingDist,\n      sources: metrics.sources,\n      nameMentions: metrics.nameMentions\n    },\n    weekInfo: {\n      fyLabel,\n      periodNum,\n      periodLabel,\n      weekNum,\n      weekStart: formatDate(weekStart),\n      weekEnd: formatDate(weekEnd),\n      weekStartDisplay: wsDisplay,\n      weekEndDisplay: weDisplay\n    },\n    fileName: 'Venue_Review_Report_' + fyLabel + '_' + periodLabel + '_WK' + weekNum + '_' + formatDate(weekStart) + '.md',\n    historyData: historyData,\n    comparisons: {\n      priorWeek: priorWeekMetrics,\n      ptdHistory: ptdHistoryMetrics,\n      priorPeriod: priorPeriodMetrics\n    }\n  }\n}];\n"
-      },
-      "id": "a17d55fb-5208-412f-99f1-c03e0f26c701",
+      "id": "6bff0e31-8c3c-417b-bfeb-b257f1e5ed85",
       "name": "Process CSV & Build Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        432,
+        512,
         112
       ]
     },
@@ -160,238 +124,55 @@
           ]
         },
         "sendBody": true,
-        "contentType": "raw",
-        "rawContentType": "application/json",
-        "body": "={{ $json.claudeRequestBody }}",
-        "options": {}
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 4096, system: 'You generate weekly feedback reports for Holey Moley Austin using the provided spec. Always use the exact computed metrics provided. Return ONLY valid JSON.', messages: [{ role: 'user', content: $('Process CSV & Build Prompt').first().json.claudePrompt }] }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 120000
+        }
       },
-      "id": "5b3eef02-b371-4c4a-8d19-a82bb90ee177",
+      "id": "b2d8322a-fdc6-4541-9f43-645229d1ea17",
       "name": "Call Claude API",
       "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4,
+      "typeVersion": 4.2,
       "position": [
-        640,
+        656,
         112
-      ]
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "<CRED_ID_httpHeaderAuth>",
+          "name": "Header Auth account"
+        }
+      }
     },
     {
       "parameters": {
-        "jsCode": "const response = $json.content[0].text; return [{json: {report: response}}];"
+        "jsCode": "const response = $json.content[0].text;\ntry {\n  // Try to parse as JSON first\n  const parsed = JSON.parse(response);\n  return [{json: {report: JSON.stringify(parsed, null, 2), reportJson: parsed}}];\n} catch(e) {\n  // If it's not JSON, return raw text\n  return [{json: {report: response, reportJson: null}}];\n}"
       },
-      "id": "6ed6138c-ff61-430e-a073-2dc81a1ad031",
+      "id": "8e9eb695-27b1-4517-9dbb-c16a9c1378d3",
       "name": "Extract Report",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        848,
+        800,
         112
       ]
     },
     {
       "parameters": {
-        "jsCode": "const report = $json.report;\nconst fileName = $('Process CSV & Build Prompt').first().json.fileName;\nconst buffer = Buffer.from(report, 'utf-8');\nreturn [{\n  json: {fileName, fileSize: buffer.length},\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'text/markdown',\n      fileName: fileName\n    }\n  }\n}];"
+        "jsCode": "const reportJson = $json.reportJson;\nconst processData = $('Process CSV & Build Prompt').first().json;\nconst weekInfo = processData.weekInfo;\nconst metrics = processData.metrics;\nconst comparisons = processData.comparisons;\nconst fileName = processData.fileName;\n\nif (!reportJson) {\n  return [{ json: { error: 'No report JSON available', fileName } }];\n}\n\nconst { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,\n  AlignmentType, BorderStyle, WidthType, ShadingType, VerticalAlign,\n  HeadingLevel, TableLayoutType } = require('docx');\n\n// ---- STYLE CONSTANTS (matches ATX Feedback Report TEMPLATE.docx) ----\nconst LIME = 'C0FE4E';\nconst WHITE = 'FFFFFF';\nconst GRAY_BG = 'F2F2F2';\nconst BLACK = '000000';\nconst GRAY_BORDER = 'CCCCCC';\n\nconst noBorder = { style: BorderStyle.NONE, size: 0, color: WHITE };\nconst noBorders = { top: noBorder, bottom: noBorder, left: noBorder, right: noBorder };\nconst thinBorder = { style: BorderStyle.SINGLE, size: 1, color: GRAY_BORDER };\nconst thinBorders = { top: thinBorder, bottom: thinBorder, left: thinBorder, right: thinBorder };\n\n// 2-column grid (simplified from template's 4-col grid — visually identical)\nconst COL_LABEL = 1952;\nconst COL_CONTENT = 8985;\nconst TABLE_W = COL_LABEL + COL_CONTENT; // 10937\n\n// ---- FONT HELPERS ----\nfunction antonRun(text, ptSize, opts = {}) {\n  return new TextRun({ text, font: 'Anton', size: ptSize * 2, bold: true, color: BLACK, ...opts });\n}\nfunction albertRun(text, ptSize, opts = {}) {\n  return new TextRun({ text, font: 'Albert Sans', size: ptSize * 2, ...opts });\n}\n\n// ---- TABLE ROW HELPERS ----\n\n// Green section header spanning full width\nfunction sectionHeader(text) {\n  return new TableRow({ children: [\n    new TableCell({\n      borders: noBorders, columnSpan: 2,\n      width: { size: TABLE_W, type: WidthType.DXA },\n      shading: { fill: LIME, type: ShadingType.CLEAR },\n      margins: { top: 120, bottom: 120, left: 120, right: 120 },\n      verticalAlign: VerticalAlign.CENTER,\n      children: [new Paragraph({ children: [antonRun(text, 12)] })],\n    }),\n  ]});\n}\n\n// Label (lime) + Content (white) row\nfunction contentRow(labelLines, contentChildren) {\n  const labelParas = labelLines.length > 0\n    ? labelLines.map((line, i) => new Paragraph({\n        spacing: { after: 0 },\n        children: [albertRun(line, i === 0 ? 10 : 9, { bold: true })],\n      }))\n    : [new Paragraph({ children: [albertRun('', 8)] })];\n\n  return new TableRow({ children: [\n    new TableCell({\n      borders: noBorders,\n      width: { size: COL_LABEL, type: WidthType.DXA },\n      shading: { fill: LIME, type: ShadingType.CLEAR },\n      margins: { top: 80, bottom: 80, left: 80, right: 40 },\n      verticalAlign: VerticalAlign.TOP,\n      children: labelParas,\n    }),\n    new TableCell({\n      borders: noBorders,\n      width: { size: COL_CONTENT, type: WidthType.DXA },\n      shading: { fill: WHITE, type: ShadingType.CLEAR },\n      margins: { top: 80, bottom: 80, left: 120, right: 80 },\n      verticalAlign: VerticalAlign.TOP,\n      children: contentChildren,\n    }),\n  ]});\n}\n\n// Full-width content row (no label, white bg)\nfunction fullWidthContent(contentChildren) {\n  return new TableRow({ children: [\n    new TableCell({\n      borders: noBorders, columnSpan: 2,\n      width: { size: TABLE_W, type: WidthType.DXA },\n      shading: { fill: WHITE, type: ShadingType.CLEAR },\n      margins: { top: 80, bottom: 80, left: 120, right: 80 },\n      verticalAlign: VerticalAlign.TOP,\n      children: contentChildren,\n    }),\n  ]});\n}\n\n// ---- NESTED TABLE HELPERS (auto-sizing) ----\nfunction autoColumnWidths(headers, dataRows, totalWidth) {\n  const minCol = 900;\n  const numCols = headers.length;\n  const maxLens = headers.map(h => String(h).length);\n  dataRows.forEach(row => {\n    row.forEach((cell, i) => {\n      if (i < numCols) {\n        const len = String(cell || '').length;\n        if (len > maxLens[i]) maxLens[i] = len;\n      }\n    });\n  });\n  const weights = maxLens.map(l => Math.sqrt(Math.max(l, 1)));\n  const totalWeight = weights.reduce((a, b) => a + b, 0);\n  let widths = weights.map(w => Math.max(minCol, Math.floor((w / totalWeight) * totalWidth)));\n  widths[widths.length - 1] += totalWidth - widths.reduce((a, b) => a + b, 0);\n  return widths;\n}\n\nfunction buildAutoTable(headers, dataRows) {\n  const totalW = COL_CONTENT;  // 8985 DXA\n  const colWidths = autoColumnWidths(headers, dataRows, totalW);\n  const rows = [];\n  // Header row\n  rows.push(new TableRow({\n    children: headers.map((h, i) => new TableCell({\n      borders: thinBorders,\n      width: { size: colWidths[i], type: WidthType.DXA },\n      shading: { fill: GRAY_BG, type: ShadingType.CLEAR },\n      margins: { top: 60, bottom: 60, left: 100, right: 100 },\n      children: [new Paragraph({ children: [albertRun(h, 9, { bold: true })] })],\n    }))\n  }));\n  // Data rows\n  dataRows.forEach(row => {\n    rows.push(new TableRow({\n      children: row.map((cell, i) => new TableCell({\n        borders: thinBorders,\n        width: { size: colWidths[i], type: WidthType.DXA },\n        margins: { top: 50, bottom: 50, left: 100, right: 100 },\n        verticalAlign: VerticalAlign.TOP,\n        children: [new Paragraph({ children: [albertRun(String(cell || '\\u2014'), 9)] })],\n      }))\n    }));\n  });\n  return new Table({\n    width: { size: totalW, type: WidthType.DXA },\n    columnWidths: colWidths,\n    rows,\n    layout: TableLayoutType.FIXED,\n  });\n}\n\n// ===================================================================\n// BUILD SECTION CONTENT\n// ===================================================================\n\n// ---- FEEDBACK BREAKDOWN ----\nfunction buildFeedbackBreakdown() {\n  const paras = [];\n  const narrative = reportJson.feedback_breakdown_narrative || reportJson.executive_summary || '';\n\n  // Narrative paragraph(s)\n  if (narrative) {\n    narrative.split('\\n').filter(l => l.trim()).forEach(line => {\n      paras.push(new Paragraph({\n        spacing: { after: 120 },\n        children: [albertRun(line.trim(), 11)],\n      }));\n    });\n    paras.push(new Paragraph({ spacing: { after: 80 }, children: [] }));\n  }\n\n  // Computed metrics (always accurate, from data — not Claude)\n  // Comparison helpers\n  const comp = comparisons || {};\n  const pw = comp.priorWeek;\n  const pp = comp.priorPeriod;\n  const ptdH = comp.ptdHistory;\n  \n  function reviewDelta(curr, prev) {\n    if (prev === undefined || prev === null) return '';\n    const d = curr - prev;\n    if (d === 0) return ' (no change)';\n    const arrow = d > 0 ? '\\u2191' : '\\u2193';\n    return ' (' + arrow + ' ' + Math.abs(d) + ')';\n  }\n  function ratingDelta(curr, prev) {\n    if (prev === undefined || prev === null) return '';\n    const d = curr - prev;\n    if (Math.abs(d) < 0.005) return ' (no change)';\n    const arrow = d > 0 ? '\\u2191' : '\\u2193';\n    // Show 2 decimals, but if very small show 3\n    const formatted = Math.abs(d) < 0.01 ? Math.abs(d).toFixed(3) : Math.abs(d).toFixed(2);\n    return ' (' + arrow + ' ' + formatted + ')';\n  }\n\n  const lines = [\n    'Total Reviews: ' + metrics.totalReviews + reviewDelta(metrics.totalReviews, pw ? pw.totalReviews : null),\n    'Weekly Average Rating: ' + metrics.weeklyAvg + ratingDelta(metrics.weeklyAvg, metrics.overallWeeklyAvgRating),\n    'PTD Average (' + weekInfo.periodLabel + '): ' + metrics.ptdAvg + ratingDelta(metrics.ptdAvg, metrics.ptdLastWeekAvg),\n    'YTD Average (' + weekInfo.fyLabel + '): ' + metrics.ytdAvg + ratingDelta(metrics.ytdAvg, metrics.ytdLastWeekAvg),\n  ];\n\n  if (metrics.deletedThisWeek > 0 || metrics.deletedPTD > 0) {\n    lines.push('Deleted (excluded from rating calcs):');\n    lines.push('  This week: ' + metrics.deletedThisWeek);\n    lines.push('  ' + weekInfo.periodLabel + ' to date: ' + metrics.deletedPTD);\n  }\n  lines.push('Response Rate: 100%');\n  lines.push('Response Time: < 1 day');\n\n  lines.forEach(l => paras.push(new Paragraph({ spacing: { after: 20 }, children: [albertRun(l, 11)] })));\n\n  // Week-over-Week Snapshot\n  if (comp.priorWeek) {\n    paras.push(new Paragraph({ spacing: { after: 60 }, children: [] }));\n    paras.push(new Paragraph({ spacing: { after: 40 }, children: [albertRun('Week-over-Week Snapshot', 11, { bold: true })] }));\n    \n    const pwk = comp.priorWeek;\n    const thisRate5 = metrics.totalReviews > 0 ? Math.round(((metrics.ratingDist[5] || {}).count || 0) / metrics.totalReviews * 100) : 0;\n    const lastRate5 = pwk.totalReviews > 0 && pwk.ratingDist ? Math.round(((pwk.ratingDist[5] || {}).count || 0) / pwk.totalReviews * 100) : null;\n    const thisDetractors = ((metrics.ratingDist[1] || {}).count || 0) + ((metrics.ratingDist[2] || {}).count || 0);\n    const lastDetractors = pwk.ratingDist ? ((pwk.ratingDist[1] || {}).count || 0) + ((pwk.ratingDist[2] || {}).count || 0) : null;\n    \n    const wowLines = [\n      'Reviews: ' + (pwk.totalReviews || 0) + ' \\u2192 ' + metrics.totalReviews + reviewDelta(metrics.totalReviews, pwk.totalReviews),\n      'Average Rating: ' + (pwk.weeklyAvg || 0) + ' \\u2192 ' + metrics.weeklyAvg + ' (overall avg: ' + (metrics.overallWeeklyAvgRating || 'N/A') + ')',\n    ];\n    if (lastRate5 !== null) {\n      const r5d = thisRate5 - lastRate5;\n      const r5arrow = r5d > 0 ? '\\u2191' : r5d < 0 ? '\\u2193' : '';\n      wowLines.push('5\\u2605 Rate: ' + lastRate5 + '% \\u2192 ' + thisRate5 + '%' + (r5d !== 0 ? ' (' + r5arrow + ' ' + Math.abs(r5d) + '%)' : ''));\n    }\n    if (lastDetractors !== null) {\n      const dd = thisDetractors - lastDetractors;\n      const darrow = dd > 0 ? '\\u2191' : dd < 0 ? '\\u2193' : '';\n      wowLines.push('Detractors (1-2\\u2605): ' + lastDetractors + ' \\u2192 ' + thisDetractors + (dd !== 0 ? ' (' + darrow + ' ' + Math.abs(dd) + ')' : ''));\n    }\n    \n    wowLines.forEach(l => paras.push(new Paragraph({ spacing: { after: 10 }, children: [albertRun(l, 11)] })));\n  }\n\n  // Trend Context\n  if (metrics.allTimeAvg || comp.priorWeek) {\n    paras.push(new Paragraph({ spacing: { after: 60 }, children: [] }));\n    paras.push(new Paragraph({ spacing: { after: 40 }, children: [albertRun('Trend Context', 11, { bold: true })] }));\n    \n    const trendLines = [];\n    if (metrics.allTimeAvg && metrics.weeklyAvg) {\n      const diff = Math.round((metrics.weeklyAvg - metrics.allTimeAvg) * 100) / 100;\n      if (diff > 0) {\n        trendLines.push('This week\\u2019s average (' + metrics.weeklyAvg + ') is above the ' + weekInfo.fyLabel + ' weekly average of ' + metrics.allTimeAvg);\n      } else if (diff < 0) {\n        trendLines.push('This week\\u2019s average (' + metrics.weeklyAvg + ') is below the ' + weekInfo.fyLabel + ' weekly average of ' + metrics.allTimeAvg);\n      } else {\n        trendLines.push('This week\\u2019s average (' + metrics.weeklyAvg + ') matches the ' + weekInfo.fyLabel + ' weekly average');\n      }\n    }\n    if (comp.priorPeriod) {\n      const ppAvg = comp.priorPeriod.weeklyAvg;\n      const ptdDiff = Math.round((metrics.ptdAvg - ppAvg) * 100) / 100;\n      const ptdArrow = ptdDiff > 0 ? '\\u2191' : ptdDiff < 0 ? '\\u2193' : '';\n      trendLines.push(weekInfo.periodLabel + ' to date (' + metrics.ptdAvg + ') vs ' + comp.priorPeriod.periodLabel + ' (' + ppAvg + '): ' + (ptdDiff !== 0 ? ptdArrow + ' ' + Math.abs(ptdDiff).toFixed(2) : 'no change'));\n    }\n    \n    trendLines.forEach(l => paras.push(new Paragraph({ spacing: { after: 10 }, children: [albertRun(l, 11)] })));\n  }\n\n  // Rating Distribution\n  paras.push(new Paragraph({ spacing: { after: 60 }, children: [] }));\n  paras.push(new Paragraph({ spacing: { after: 20 }, children: [albertRun('Rating Distribution', 11, { bold: true })] }));\n  const dist = metrics.ratingDist || {};\n  [5, 4, 3, 2, 1].forEach(s => {\n    const d = dist[s];\n    if (d && d.count > 0) {\n      paras.push(new Paragraph({ spacing: { after: 10 }, children: [albertRun(s + '\\u2605 \\u2013 ' + d.count + ' (' + d.pct + '%)', 11)] }));\n    }\n  });\n\n  // Sources\n  paras.push(new Paragraph({ spacing: { after: 60 }, children: [] }));\n  paras.push(new Paragraph({ spacing: { after: 20 }, children: [albertRun('Sources', 11, { bold: true })] }));\n  Object.entries(metrics.sources || {}).forEach(([src, cnt]) => {\n    paras.push(new Paragraph({ spacing: { after: 10 }, children: [albertRun(src + ' \\u2013 ' + cnt, 11)] }));\n  });\n\n  return paras;\n}\n\n// ---- OBSERVATION BULLETS ----\nfunction buildBullets(items) {\n  if (!items || (Array.isArray(items) && items.length === 0)) {\n    return [new Paragraph({ children: [albertRun('None this week', 11)] })];\n  }\n  if (typeof items === 'string') {\n    return [new Paragraph({ children: [albertRun(items, 11)] })];\n  }\n  if (Array.isArray(items)) {\n    return items.map(item => {\n      const text = typeof item === 'string' ? item : (item.summary || item.snippet || JSON.stringify(item));\n      return new Paragraph({ spacing: { after: 80 }, children: [albertRun('  ' + text, 11)] });\n    });\n  }\n  // Legacy {summary, snippets} format\n  if (items.summary) {\n    return [new Paragraph({ spacing: { after: 80 }, children: [albertRun(items.summary, 11)] })];\n  }\n  return [new Paragraph({ children: [albertRun('None this week', 11)] })];\n}\n\n// ---- FEEDBACK TRENDS ----\nfunction buildTrends() {\n  const t = reportJson.feedback_trends || {};\n  const paras = [];\n  paras.push(new Paragraph({ spacing: { after: 60 }, children: [albertRun('\\u2705 Positive Trends', 11, { bold: true })] }));\n  (t.positive || []).forEach(b => paras.push(new Paragraph({ spacing: { after: 60 }, children: [albertRun(b, 11)] })));\n  paras.push(new Paragraph({ spacing: { after: 100 }, children: [] }));\n  paras.push(new Paragraph({ spacing: { after: 60 }, children: [albertRun('\\u274C Negative Trends', 11, { bold: true })] }));\n  (t.negative || []).forEach(b => paras.push(new Paragraph({ spacing: { after: 60 }, children: [albertRun(b, 11)] })));\n  return paras;\n}\n\n// ---- KEYWORD TRENDS TABLE ----\nfunction buildKeywordTable() {\n  const kw = reportJson.keyword_trends || [];\n  const categories = ['Product / Drinks', 'Service', 'Location / Atmosphere', 'Value', 'Customer Use Case'];\n  const headers = ['Category', 'Top Positive Mentions', 'Top Negative Mentions'];\n  const dataRows = categories.map(cat => {\n    const item = kw.find(k => k.category && k.category.toLowerCase().includes(cat.split(' / ')[0].toLowerCase())) || {};\n    const pos = item.positive || item.positive_mentions || '\\u2014';\n    const neg = item.negative || item.negative_mentions || '\\u2014';\n    return [cat, typeof pos === 'number' ? String(pos) : pos, typeof neg === 'number' ? String(neg) : neg];\n  });\n  return buildAutoTable(headers, dataRows);\n}\n\n// ---- SENTIMENT BY DAY TABLE ----\nfunction buildSentimentTable() {\n  const days = reportJson.sentiment_by_day || [];\n  const headers = ['Day', 'Positive Sentiment', 'Negative / Improvement Notes'];\n  const dataRows = days.map(d => {\n    const pos = d.positive_text || d.positive || '\\u2014';\n    const neg = d.negative_text || d.negative || '\\u2014';\n    return [d.day || '', typeof pos === 'number' ? String(pos) : pos, typeof neg === 'number' ? String(neg) : neg];\n  });\n  return buildAutoTable(headers, dataRows);\n}\n\n// ---- FOCUS POINTS ----\nfunction buildFocusPoints() {\n  const fp = reportJson.focus_points || {};\n  const paras = [];\n  paras.push(new Paragraph({ spacing: { after: 60 }, children: [albertRun('What to Keep Doing', 11, { bold: true })] }));\n  (fp.keep_doing || []).forEach(b => paras.push(new Paragraph({ spacing: { after: 60 }, children: [albertRun(b, 11)] })));\n  paras.push(new Paragraph({ spacing: { after: 100 }, children: [] }));\n  paras.push(new Paragraph({ spacing: { after: 60 }, children: [albertRun('Opportunities to Improve', 11, { bold: true })] }));\n  (fp.improve || []).forEach(b => paras.push(new Paragraph({ spacing: { after: 60 }, children: [albertRun(b, 11)] })));\n  return paras;\n}\n\n// ---- NAME DROPS TABLE ----\n// Pulled deterministically from Process CSV (canonical roster + alias normalization),\n// not from the LLM. Each row = one staff member with drops THIS WEEK; total is period-to-date.\nfunction buildNameDrops() {\n  const drops = processData.nameDropsSection || [];\n  if (drops.length === 0) {\n    return [new Paragraph({ children: [albertRun('No staff mentioned by name this week.', 11)] })];\n  }\n  const headers = ['Staff Member', 'Period to Date'];\n  const dataRows = drops.map(d => [d.name, `${d.period_total} (+${d.week_delta} this week)`]);\n  return [buildAutoTable(headers, dataRows)];\n}\n\n// ===================================================================\n// ASSEMBLE DOCUMENT\n// ===================================================================\nconst obs = reportJson.review_observations || {};\n\nconst mainTable = new Table({\n  width: { size: TABLE_W, type: WidthType.DXA },\n  columnWidths: [COL_LABEL, COL_CONTENT],\n  layout: TableLayoutType.FIXED,\n  rows: [\n    sectionHeader('FEEDBACK BREAKDOWN'),\n    contentRow([], buildFeedbackBreakdown()),\n\n    sectionHeader('REVIEW OBSERVATIONS'),\n    contentRow(['4 & 5 Stars', '(promoters)'], buildBullets(obs.promoters)),\n    contentRow(['3 STAR \\u2013', '(neutrals)'], buildBullets(obs.neutrals)),\n    contentRow(['1 & 2 stars', '(detractors)'], buildBullets(obs.detractors)),\n\n    sectionHeader('FEEDBACK TRENDS'),\n    contentRow([], buildTrends()),\n\n    sectionHeader('Keyword Trends'),\n    contentRow([], [buildKeywordTable()]),\n\n    sectionHeader('Sentiment & Review Frequency by Day'),\n    contentRow([], [buildSentimentTable()]),\n\n    sectionHeader('FOCUS POINTS'),\n    contentRow([], buildFocusPoints()),\n\n    sectionHeader('NAME DROPS'),\n    fullWidthContent(buildNameDrops()),\n\n    sectionHeader('NOTABLE HAPPENINGS'),\n    fullWidthContent([new Paragraph({\n      children: [albertRun(' *Leave empty for team member to fill out*', 11, { italics: true })],\n    })]),\n  ],\n});\n\nconst doc = new Document({\n  sections: [{\n    properties: {\n      page: {\n        size: { width: 12240, height: 15840 },\n        margin: { top: 1440, bottom: 1440, left: 720, right: 720 },\n      }\n    },\n    children: [\n      new Paragraph({\n        heading: HeadingLevel.HEADING_1,\n        spacing: { after: 200 },\n        children: [antonRun('FEEDBACK REPORT', 30)],\n      }),\n      new Paragraph({\n        heading: HeadingLevel.HEADING_2,\n        spacing: { after: 100 },\n        children: [antonRun('Venue: Holey Moley Austin', 18)],\n      }),\n      new Paragraph({\n        heading: HeadingLevel.HEADING_2,\n        spacing: { after: 100 },\n        children: [antonRun(weekInfo.fyLabel + ' ' + weekInfo.periodLabel, 18)],\n      }),\n      new Paragraph({\n        heading: HeadingLevel.HEADING_2,\n        spacing: { after: 400 },\n        children: [antonRun('Week ' + weekInfo.weekNum + ': ' + weekInfo.weekStartDisplay + ' \\u2013 ' + weekInfo.weekEndDisplay, 18)],\n      }),\n      mainTable,\n    ],\n  }],\n});\n\nconst buffer = await Packer.toBuffer(doc);\n\nreturn [{\n  json: { fileName, fileSize: buffer.length },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',\n      fileName,\n    }\n  }\n}];\n"
       },
-      "id": "3dc9b8ea-f73c-4e57-b718-e57c77da08d9",
+      "id": "0ce5d014-6099-4abe-88ae-9087c71a2d3e",
       "name": "Prepare Report File",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1040,
-        112
-      ]
-    },
-    {
-      "parameters": {
-        "url": "https://www.googleapis.com/drive/v3/files",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "q",
-              "value": "={{ \"name='\" + $json.fileName.match(/FY\\d{2}-\\d{2}/)[0] + \"' and mimeType='application/vnd.google-apps.folder' and trashed=false\" }}"
-            },
-            {
-              "name": "fields",
-              "value": "files(id,name)"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "17738c9c-9834-4ed3-af51-76eca6bd6bc5",
-      "name": "Search FY Folder",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1248,
-        112
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": false
-          },
-          "combinator": "and",
-          "conditions": [
-            {
-              "id": "condition-fy-exists",
-              "leftValue": "={{ $json.files.length }}",
-              "rightValue": "0",
-              "operator": {
-                "type": "number",
-                "operation": "gt"
-              }
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "ea2caaa3-484c-4271-af5b-af9c963e6e57",
-      "name": "FY Exists?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        1424,
-        112
-      ]
-    },
-    {
-      "parameters": {
-        "resource": "folder",
-        "name": "={{ $('Process CSV & Build Prompt').first().json.weekInfo.fyLabel }}",
-        "driveId": {
-          "__rl": true,
-          "mode": "list",
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID"
-        },
-        "folderId": {
-          "__rl": true,
-          "mode": "list",
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
-          "cachedResultName": "/ (Root folder)"
-        },
-        "options": {}
-      },
-      "id": "f4f27722-782a-4974-9a84-829c8a1da66d",
-      "name": "Create FY Folder",
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
-      "position": [
-        1424,
-        304
-      ],
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
-          "name": "Your googleDriveOAuth2Api"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "url": "https://www.googleapis.com/drive/v3/files",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "googleDriveOAuth2Api",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "q",
-              "value": "={{ \"name='\" + $('Prepare Report File').first().json.fileName.match(/P\\d{2}/)[0] + \"' and mimeType='application/vnd.google-apps.folder' and trashed=false and '\" + $json.id + \"' in parents\" }}"
-            },
-            {
-              "name": "fields",
-              "value": "files(id,name)"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "aec3b307-7608-4ab3-bc7c-9d6ac578c942",
-      "name": "Search Period Folder",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        1632,
-        112
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": false
-          },
-          "combinator": "and",
-          "conditions": [
-            {
-              "id": "condition-period-exists",
-              "leftValue": "={{ $json.files.length }}",
-              "rightValue": "0",
-              "operator": {
-                "type": "number",
-                "operation": "gt"
-              }
-            }
-          ]
-        },
-        "options": {}
-      },
-      "id": "aa487273-8c85-461b-ba51-ab58ddf92435",
-      "name": "Period Exists?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [
-        1808,
-        112
-      ]
-    },
-    {
-      "parameters": {
-        "resource": "folder",
-        "name": "={{ $('Process CSV & Build Prompt').first().json.weekInfo.periodLabel }}",
-        "driveId": {
-          "__rl": true,
-          "mode": "list",
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID"
-        },
-        "folderId": {
-          "__rl": true,
-          "mode": "list",
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
-          "cachedResultName": "/ (Root folder)"
-        },
-        "options": {}
-      },
-      "id": "428fdb37-dadb-4460-bb7f-6e403b5237e6",
-      "name": "Create Period Folder",
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
-      "position": [
-        1808,
-        304
-      ],
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
-          "name": "Your googleDriveOAuth2Api"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "jsCode": "const reportFile = $('Prepare Report File').first();\nconst folderId = $json.id;\nconst processData = $('Process CSV & Build Prompt').first().json;\nreturn [{\n  json: {\n    folderId,\n    fileName: processData.fileName\n  },\n  binary: reportFile.binary\n}];"
-      },
-      "id": "3e272766-c41c-49e2-b726-10b36794fb90",
-      "name": "Combine for Upload",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        2000,
+        1008,
         112
       ]
     },
@@ -401,135 +182,271 @@
         "driveId": {
           "__rl": true,
           "mode": "list",
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID"
+          "value": "My Drive"
         },
         "folderId": {
           "__rl": true,
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "value": "={{ $json.folderId }}",
           "mode": "id"
         },
         "options": {}
       },
-      "id": "f84fbee2-4193-47fb-824c-9aeaf616cb2f",
+      "id": "972cc928-bd83-401d-b400-aff2105f0213",
       "name": "Upload Report",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
       "position": [
-        2208,
-        112
+        1360,
+        0
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
-          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
-          "name": "Your googleDriveOAuth2Api"
+          "id": "<CRED_ID_googleDriveOAuth2Api>",
+          "name": "Google Drive account"
         }
       }
     },
     {
       "parameters": {
-        "jsCode": "const processData = $('Process CSV & Build Prompt').first().json;\n\n// Get history from the Process CSV node's stored data\nlet history = processData.historyData || { weeks: [] };\n\nconst newWeekEntry = {\n  fyLabel: processData.weekInfo.fyLabel,\n  periodNum: processData.weekInfo.periodNum,\n  periodLabel: processData.weekInfo.periodLabel,\n  weekNum: processData.weekInfo.weekNum,\n  weekStart: processData.weekInfo.weekStart,\n  weekEnd: processData.weekInfo.weekEnd,\n  totalReviews: processData.metrics.totalReviews,\n  weeklyAvg: processData.metrics.weeklyAvg,\n  deletedThisWeek: processData.metrics.deletedThisWeek,\n  ratingDist: processData.metrics.ratingDist,\n  sources: processData.metrics.sources,\n  generatedAt: new Date().toISOString()\n};\n\nhistory.weeks.push(newWeekEntry);\nconst jsonStr = JSON.stringify(history, null, 2);\nconst buffer = Buffer.from(jsonStr, 'utf-8');\n\nreturn [{\n  json: {\n    fileName: 'metrics_history.json',\n    size: buffer.length\n  },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'application/json',\n      fileName: 'metrics_history.json'\n    }\n  }\n}];"
+        "jsCode": "// Upload directly to Completed Review Reports folder\nconst COMPLETED_REPORTS_FOLDER = '<DRIVE_ID_02>';\n\nconst processData = $('Process CSV & Build Prompt').first().json;\nconst inputItem = $input.first();\n\nreturn [{\n  json: {\n    folderId: COMPLETED_REPORTS_FOLDER,\n    fyLabel: processData.weekInfo.fyLabel,\n    periodLabel: processData.weekInfo.periodLabel,\n    fileName: processData.fileName\n  },\n  binary: inputItem.binary\n}];"
       },
-      "id": "b4d31325-503d-45b8-bc3b-add2d61dd78c",
-      "name": "Update Metrics History",
+      "id": "aaa11111-resolve-folder-id",
+      "name": "Resolve Folder ID",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2400,
+        1200,
         112
       ]
-    },
-    {
-      "parameters": {
-        "name": "metrics_history.json",
-        "driveId": {
-          "__rl": true,
-          "mode": "list",
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID"
-        },
-        "folderId": {
-          "__rl": true,
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
-          "mode": "id"
-        },
-        "options": {}
-      },
-      "id": "142c6435-a51f-4812-bd30-9ffb82047d33",
-      "name": "Upload Metrics History",
-      "type": "n8n-nodes-base.googleDrive",
-      "typeVersion": 3,
-      "position": [
-        2608,
-        112
-      ],
-      "credentials": {
-        "googleDriveOAuth2Api": {
-          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
-          "name": "Your googleDriveOAuth2Api"
-        }
-      }
     },
     {
       "parameters": {
         "operation": "move",
         "fileId": {
           "__rl": true,
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
+          "value": "={{ $('Google Drive Trigger').first().json.id }}",
           "mode": "id"
         },
         "driveId": {
           "__rl": true,
           "mode": "list",
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID"
+          "value": "My Drive"
         },
         "folderId": {
           "__rl": true,
-          "value": "YOUR_GOOGLE_DRIVE_FOLDER_ID",
-          "mode": "id"
+          "value": "<DRIVE_ID_03>",
+          "mode": "list",
+          "cachedResultName": "csv archive",
+          "cachedResultUrl": "https://drive.google.com/drive/folders/<DRIVE_ID_03>"
         }
       },
-      "id": "1c639e26-64f9-40b6-a326-20bec50723ed",
+      "id": "c96ba9bc-archive-csv-node",
       "name": "Archive CSV",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
       "position": [
-        2800,
+        1760,
         112
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
-          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
-          "name": "Your googleDriveOAuth2Api"
+          "id": "<CRED_ID_googleDriveOAuth2Api>",
+          "name": "Google Drive account"
         }
       }
     },
     {
       "parameters": {
-        "jsCode": "// Normalize FY folder ID from either search result or create result\nconst item = $input.first();\nlet folderId;\nif (item.json.files && item.json.files.length > 0) {\n  folderId = item.json.files[0].id;\n} else if (item.json.id) {\n  folderId = item.json.id;\n}\nreturn [{ json: { id: folderId, source: 'fy_folder' } }];"
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "<DRIVE_ID_04>",
+          "mode": "id"
+        },
+        "options": {}
       },
-      "id": "906ed1bc-6373-48f2-81c6-4c629f5553cc",
-      "name": "Get FY Folder ID",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
+      "id": "ddd-download-master",
+      "name": "Download Master",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
       "position": [
-        1632,
-        0
+        -16,
+        176
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "<CRED_ID_googleDriveOAuth2Api>",
+          "name": "Google Drive account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "id": "eee-merge-csvs",
+      "name": "Merge New + Master",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        208,
+        112
       ]
     },
     {
       "parameters": {
-        "jsCode": "// Normalize Period folder ID from either search result or create result\nconst item = $input.first();\nlet folderId;\nif (item.json.files && item.json.files.length > 0) {\n  folderId = item.json.files[0].id;\n} else if (item.json.id) {\n  folderId = item.json.id;\n}\nreturn [{ json: { id: folderId, source: 'period_folder' } }];"
+        "operation": "update",
+        "fileId": {
+          "__rl": true,
+          "value": "<DRIVE_ID_04>",
+          "mode": "id"
+        },
+        "options": {}
       },
-      "id": "a376008f-fb0b-4676-9de4-846af95d1afb",
-      "name": "Get Period Folder ID",
+      "id": "fff-upload-master",
+      "name": "Upload Master",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1648,
+        224
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "<CRED_ID_googleDriveOAuth2Api>",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge new CSV with master CSV, deduplicate by Review ID\nconst processData = $('Process CSV & Build Prompt').first().json;\nconst mergedCsvText = processData.mergedCsvText;\n\nif (!mergedCsvText) {\n  throw new Error('No merged CSV text available');\n}\n\nconst buffer = Buffer.from(mergedCsvText, 'utf-8');\nreturn [{\n  json: { fileName: 'master_reviews.csv', size: buffer.length },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'text/csv',\n      fileName: 'master_reviews.csv'\n    }\n  }\n}];"
+      },
+      "id": "ggg-build-master",
+      "name": "Build Master CSV",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        2000,
-        0
+        1472,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.telegram.org/bot<TELEGRAM_BOT_TOKEN>/sendMessage",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  chat_id: 8164424796,\n  text: '📊 HM FEEDBACK REPORT\\n' +\n    $('Process CSV & Build Prompt').first().json.weekInfo.fyLabel + ' ' +\n    $('Process CSV & Build Prompt').first().json.weekInfo.periodLabel + ' WK' +\n    $('Process CSV & Build Prompt').first().json.weekInfo.weekNum + '\\n' +\n    $('Process CSV & Build Prompt').first().json.weekInfo.weekStartDisplay + ' – ' +\n    $('Process CSV & Build Prompt').first().json.weekInfo.weekEndDisplay + '\\n\\n' +\n    '📈 This Week: ' + $('Process CSV & Build Prompt').first().json.metrics.totalReviews + ' reviews | ' +\n    $('Process CSV & Build Prompt').first().json.metrics.weeklyAvg + '★ avg\\n' +\n    (($('Process CSV & Build Prompt').first().json.comparisons || {}).priorWeek ?\n      '📉 Last Week: ' + $('Process CSV & Build Prompt').first().json.comparisons.priorWeek.totalReviews + ' reviews | ' +\n      $('Process CSV & Build Prompt').first().json.comparisons.priorWeek.weeklyAvg + '★ avg\\n' : '') +\n    '\\n──────────────────\\n' +\n    '🔦 HIGHLIGHTS / ISSUES\\n' +\n    ($('Extract Report').first().json.reportJson.review_observations ?\n      (($('Extract Report').first().json.reportJson.review_observations.promoters || []).slice(0,2).map(function(b) { return '✅ ' + (typeof b === 'string' ? b : b.summary || '').substring(0,120) }).join('\\n') || 'No promoter highlights') : 'N/A') +\n    '\\n' +\n    (($('Extract Report').first().json.reportJson.review_observations.detractors || []).slice(0,2).map(function(b) { return '⚠️ ' + (typeof b === 'string' ? b : b.summary || '').substring(0,120) }).join('\\n') || '') +\n    '\\n\\n📊 REVIEW TRENDS\\n' +\n    ($('Extract Report').first().json.reportJson.feedback_trends ?\n      (($('Extract Report').first().json.reportJson.feedback_trends.positive || []).slice(0,2).map(function(t) { return '↑ ' + t.substring(0,100) }).join('\\n')) +\n      '\\n' +\n      (($('Extract Report').first().json.reportJson.feedback_trends.negative || []).slice(0,2).map(function(t) { return '↓ ' + t.substring(0,100) }).join('\\n') || '(none)') : 'N/A') +\n    '\\n\\n🎯 VENUE STANDARDS — WHAT\\'S SLIPPING?\\n' +\n    ($('Extract Report').first().json.reportJson.focus_points ?\n      (($('Extract Report').first().json.reportJson.focus_points.improve || []).slice(0,3).map(function(f) { return '• ' + f.substring(0,120) }).join('\\n')) : 'N/A') +\n    '\\n\\n🛠 GAPS + FIXES\\n' +\n    ($('Extract Report').first().json.reportJson.focus_points ?\n      (($('Extract Report').first().json.reportJson.focus_points.keep_doing || []).slice(0,2).map(function(f) { return '👍 ' + f.substring(0,120) }).join('\\n')) : 'N/A') +\n    '\\n\\n📎 Full Report:\\n' +\n    $('Upload Report').first().json.webViewLink,\n  parse_mode: 'HTML'\n}) }}",
+        "options": {}
+      },
+      "id": "hhh-email-notify",
+      "name": "Telegram Notification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1664,
+        -48
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "<DRIVE_ID_05>",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "mmm-download-memory",
+      "name": "Download Memory",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -16,
+        336
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "<CRED_ID_googleDriveOAuth2Api>",
+          "name": "Google Drive account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {},
+      "id": "mmm-merge-memory",
+      "name": "Merge All Data",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        368,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read existing memory and append this week's report summary\nconst reportJson = $('Extract Report').first().json.reportJson || {};\nconst processData = $('Process CSV & Build Prompt').first().json;\nconst weekInfo = processData.weekInfo;\nconst metrics = processData.metrics;\n\n// Build this week's summary\nconst newEntry = {\n  week: weekInfo.weekNum,\n  period: weekInfo.periodLabel,\n  fy: weekInfo.fyLabel,\n  dates: weekInfo.weekStartDisplay + ' - ' + weekInfo.weekEndDisplay,\n  reviews: metrics.totalReviews,\n  avg: metrics.weeklyAvg,\n  ptdAvg: metrics.ptdAvg,\n  ytdAvg: metrics.ytdAvg,\n  executive: (reportJson.executive_summary || '').substring(0, 200),\n  positiveTrends: (reportJson.feedback_trends && reportJson.feedback_trends.positive || []).slice(0, 3).map(t => t.substring(0, 100)),\n  negativeTrends: (reportJson.feedback_trends && reportJson.feedback_trends.negative || []).slice(0, 3).map(t => t.substring(0, 100)),\n  keepDoing: (reportJson.focus_points && reportJson.focus_points.keep_doing || []).slice(0, 2).map(t => t.substring(0, 100)),\n  improve: (reportJson.focus_points && reportJson.focus_points.improve || []).slice(0, 2).map(t => t.substring(0, 100)),\n  generatedAt: new Date().toISOString()\n};\n\n// Get existing memory from Process CSV\nconst existingMemory = processData.reportMemory || [];\n\n// Append and keep last 52 weeks (1 year)\nexistingMemory.push(newEntry);\nconst trimmed = existingMemory.slice(-52);\n\nconst jsonStr = JSON.stringify(trimmed, null, 2);\nconst buffer = Buffer.from(jsonStr, 'utf-8');\n\nreturn [{\n  json: { fileName: 'report_memory.json', size: buffer.length, entries: trimmed.length },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'application/json',\n      fileName: 'report_memory.json'\n    }\n  }\n}];"
+      },
+      "id": "mmm-update-memory",
+      "name": "Update Memory",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1536,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "fileId": {
+          "__rl": true,
+          "value": "<DRIVE_ID_05>",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "mmm-upload-memory",
+      "name": "Upload Memory",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1712,
+        400
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "<CRED_ID_googleDriveOAuth2Api>",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "nnn-split-batches",
+      "name": "One CSV at a Time",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -144,
+        112
       ]
     }
   ],
-  "pinData": {},
   "connections": {
     "Google Drive Trigger": {
       "main": [
@@ -546,12 +463,7 @@
       "main": [
         [
           {
-            "node": "Download CSV",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Download Metrics History",
+            "node": "One CSV at a Time",
             "type": "main",
             "index": 0
           }
@@ -562,29 +474,29 @@
       "main": [
         [
           {
-            "node": "Merge CSV + History",
+            "node": "Merge New + Master",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Download Metrics History": {
+    "Download Master": {
       "main": [
         [
           {
-            "node": "Merge CSV + History",
+            "node": "Merge New + Master",
             "type": "main",
-            "index": 0
+            "index": 1
           }
         ]
       ]
     },
-    "Merge CSV + History": {
+    "Merge New + Master": {
       "main": [
         [
           {
-            "node": "Process CSV & Build Prompt",
+            "node": "Merge All Data",
             "type": "main",
             "index": 0
           }
@@ -628,98 +540,28 @@
       "main": [
         [
           {
-            "node": "Search FY Folder",
+            "node": "Resolve Folder ID",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Search FY Folder": {
-      "main": [
-        [
-          {
-            "node": "FY Exists?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "FY Exists?": {
-      "main": [
-        [
-          {
-            "node": "Get FY Folder ID",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Create FY Folder",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Create FY Folder": {
-      "main": [
-        [
-          {
-            "node": "Get FY Folder ID",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Search Period Folder": {
-      "main": [
-        [
-          {
-            "node": "Period Exists?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Period Exists?": {
-      "main": [
-        [
-          {
-            "node": "Get Period Folder ID",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Create Period Folder",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Create Period Folder": {
-      "main": [
-        [
-          {
-            "node": "Get Period Folder ID",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Combine for Upload": {
+    "Resolve Folder ID": {
       "main": [
         [
           {
             "node": "Upload Report",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Build Master CSV",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Update Memory",
             "type": "main",
             "index": 0
           }
@@ -730,51 +572,89 @@
       "main": [
         [
           {
-            "node": "Update Metrics History",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Update Metrics History": {
-      "main": [
-        [
-          {
-            "node": "Upload Metrics History",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Upload Metrics History": {
-      "main": [
-        [
-          {
             "node": "Archive CSV",
             "type": "main",
             "index": 0
-          }
-        ]
-      ]
-    },
-    "Get FY Folder ID": {
-      "main": [
-        [
+          },
           {
-            "node": "Search Period Folder",
+            "node": "Telegram Notification",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Get Period Folder ID": {
+    "Build Master CSV": {
       "main": [
         [
           {
-            "node": "Combine for Upload",
+            "node": "Upload Master",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Memory": {
+      "main": [
+        [
+          {
+            "node": "Merge All Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge All Data": {
+      "main": [
+        [
+          {
+            "node": "Process CSV & Build Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Memory": {
+      "main": [
+        [
+          {
+            "node": "Upload Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One CSV at a Time": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Download CSV",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Download Master",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Download Memory",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Archive CSV": {
+      "main": [
+        [
+          {
+            "node": "One CSV at a Time",
             "type": "main",
             "index": 0
           }
@@ -782,16 +662,7 @@
       ]
     }
   },
-  "active": false,
   "settings": {
-    "executionOrder": "v1",
-    "binaryMode": "separate",
-    "availableInMCP": false
-  },
-  "versionId": "b1596f65-7346-40f8-bf3e-11f507656eb5",
-  "meta": {
-    "templateCredsSetupCompleted": false
-  },
-  "id": "ed7e276c-9e05-4102-9383-97712a62ca1b",
-  "tags": []
+    "executionOrder": "v1"
+  }
 }
